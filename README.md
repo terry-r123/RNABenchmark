@@ -35,7 +35,7 @@ Data can be found in path "/mnt/data/oss_beijing/multi-omics/RNA/downstream/" on
 - [x] Mean Ribosome Loading
 - [x] Vaccine Degradation Prediction
 - [x] Secondary structure prediction
-- [ ] Modification Prediction  solving small problem
+- [x] Modification Prediction  solving small problem
 - [ ] Contact map prediction
 - [ ] Distance map prediction
 
