@@ -21,8 +21,8 @@ from sklearn.metrics import roc_auc_score, matthews_corrcoef
 
 from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel
 
-from model.modeling_rnalm import BertForSequenceClassification
-from model.rnalm_config import RNALMConfig
+from model.rnalm.modeling_rnalm import BertForSequenceClassification
+from model.rnalm.rnalm_config import RNALMConfig
 
 @dataclass
 class ModelArguments:
@@ -71,7 +71,7 @@ class TrainingArguments(transformers.TrainingArguments):
     seed: int = field(default=42)
     fp16: bool = field(default=False)
     report_to: str = field(default="tensorboard")
-    metric_for_best_model: str = field(default="mean_auc")
+    metric_for_best_model: str = field(default="mean_mcc")
     stage: str = field(default='0')
     model_type: str = field(default='dna')
     token_type: str = field(default='6mer')
@@ -133,7 +133,7 @@ class SupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
     def __init__(self, 
-                 data_path: str, 
+                 data_path: str, data_args,
                  tokenizer: transformers.PreTrainedTokenizer, 
                  kmer: int = -1):
 
@@ -147,7 +147,13 @@ class SupervisedDataset(Dataset):
         self.num_labels = 12
         self.kmer = kmer
         self.tokenizer = tokenizer
-        
+         # ensure tokenier
+        print(type(self.data["seq"][0]))
+        print(self.data["seq"][0])
+        test_example = tokenizer.tokenize(self.data["seq"][0])
+        print(test_example)
+        print(len(test_example))
+        print(tokenizer(self.data["seq"][0]))
 
     def __len__(self):
         return len(self.data)
@@ -200,7 +206,7 @@ def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
     metrics = {}
     # logits_torch = torch.from_numpy(logits).float()
     # p = torch.sigmoid(logits_torch)
-    p = logits
+    p = torch.sigmoid(logits)
     y = labels
     # y, p = data['labels'], torch.sigmoid(data['predictions'])
     # compute auc for each class independetly, https://github.com/jimmyyhwu/deepsea/blob/master/compute_aucs.py#L46
@@ -263,23 +269,25 @@ def train():
             use_fast=True,
             # trust_remote_code=True,
         )
-    token_test = "ATCGGCAGTACAGCGATTTGACGAT"
-    print(token_test)
-    print(tokenizer.tokenize(token_test))
-    print(tokenizer(token_test))
+    # token_test = "ATCGGCAGTACAGCGATTTGACGAT"
+    # print(token_test)
+    # print(tokenizer.tokenize(token_test))
+    # print(tokenizer(token_test))
     if "InstaDeepAI" in model_args.model_name_or_path:
         tokenizer.eos_token = tokenizer.pad_token
-
+    if 'mer' in training_args.token_type:
+        data_args.kmer=int(training_args.token_type[0])
     # define datasets and data collator
-    train_dataset = SupervisedDataset(tokenizer=tokenizer, 
+    train_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=data_args,
                                       data_path=os.path.join(data_args.data_path, "train.csv"), 
                                       kmer=data_args.kmer)
-    val_dataset = SupervisedDataset(tokenizer=tokenizer, 
-                                     data_path=os.path.join(data_args.data_path, "dev.csv"), 
+    val_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=data_args,
+                                     data_path=os.path.join(data_args.data_path, "val.csv"), 
                                      kmer=data_args.kmer)
-    test_dataset = SupervisedDataset(tokenizer=tokenizer, 
+    test_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=data_args,
                                      data_path=os.path.join(data_args.data_path, "test.csv"), 
                                      kmer=data_args.kmer)
+    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
     print(f'# train: {len(train_dataset)},val:{len(val_dataset)},test:{len(test_dataset)}')
     data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
 
@@ -326,10 +334,9 @@ def train():
                 use_alibi=model_args.use_alibi,
                 
             )
-    else:
-        if training_args.model_type == 'rnabert':
+    elif training_args.model_type == 'rnalm':
             if training_args.train_from_scratch:
-                print('Loading 6mer model')
+                
                 print('Train from scratch')
                 config = RNALMConfig.from_pretrained(model_args.model_name_or_path,
                     num_labels=train_dataset.num_labels)
@@ -337,12 +344,9 @@ def train():
                     config
                     )
             else:
-                print('Loading 6mer model')
-                #config = MMoeBertConfig.from_pretrained(model_args.model_name_or_path, cache_dir=training_args.cache_dir)
-                #config.use_flash_attn = False
+                print('Loading rnalm model')
                 print(train_dataset.num_labels)
-                #config.num_labels=train_dataset.num_labels
-                #from transformers import BertForSequenceClassification
+
                 model = BertForSequenceClassification.from_pretrained(
                     model_args.model_name_or_path,
                     #config = config,
@@ -351,22 +355,22 @@ def train():
                     #trust_remote_code=True,
                     )
             
-        else:
-            if training_args.train_from_scratch:
-                print('Loading esm model')
-                print('Train from scratch')
-                config = AutoConfig.from_pretrained(model_args.model_name_or_path,
-                    num_labels=train_dataset.num_labels)
-                model = transformers.AutoModelForSequenceClassification.from_config(
-                    config
-                    )
-            else:
-                model = transformers.AutoModelForSequenceClassification.from_pretrained(
-                    model_args.model_name_or_path,
-                    cache_dir=training_args.cache_dir,
-                    num_labels=train_dataset.num_labels,
-                    trust_remote_code=True,
+    else:
+        if training_args.train_from_scratch:
+            print('Loading esm model')
+            print('Train from scratch')
+            config = AutoConfig.from_pretrained(model_args.model_name_or_path,
+                num_labels=train_dataset.num_labels)
+            model = transformers.AutoModelForSequenceClassification.from_config(
+                config
                 )
+        else:
+            model = transformers.AutoModelForSequenceClassification.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                num_labels=train_dataset.num_labels,
+                trust_remote_code=True,
+            )
     #print(model_args,training_args)
     # configure LoRA
     if model_args.apply_lora:
@@ -380,11 +384,7 @@ def train():
             inference_mode=False,
         )
         model = get_peft_model(model, lora_config)
-        #model.print_trainable_parameters()
 
-    # if model_args.apply_ia3:
-    #     peft_config = IA3_lora.LoRAConfig(lora_rank=model_args.lora_r, lora_init_scale=model_args.lora_init_scale)
-    #     model = IA3_lora.modify_with_lora(model, peft_config)
     if 'mmoe' in model_args.model_name_or_path:
         if torch.distributed.get_rank() in [0, -1]:
             for name, param in model.named_parameters():
@@ -411,7 +411,7 @@ def train():
         results = trainer.evaluate(eval_dataset=test_dataset)
         print("on the test set:", results, "\n", results_path)
         os.makedirs(results_path, exist_ok=True)
-        with open(os.path.join(results_path, "eval_results.json"), "w") as f:
+        with open(os.path.join(results_path, "test_results.json"), "w") as f:
             json.dump(results, f)
          
 

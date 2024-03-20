@@ -28,8 +28,8 @@ from torch.utils.data import Dataset
 #     get_peft_model,
 #     get_peft_model_state_dict,
 # )
-from model.modeling_rnalm import BertForRNAMRL
-from model.rnalm_config import RNALMConfig
+from model.rnalm.modeling_rnalm import BertForRNAMRL
+from model.rnalm.rnalm_config import RNALMConfig
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
@@ -324,7 +324,7 @@ def train():
                 config
                 )
         else:
-            print('Loading rnabert model')
+            print('Loading rnalm model')
             #config = MMoeBertConfig.from_pretrained(model_args.model_name_or_path, cache_dir=training_args.cache_dir)
             #config.use_flash_attn = False
             print(train_dataset.num_labels)

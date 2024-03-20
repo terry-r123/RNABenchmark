@@ -19,13 +19,13 @@ os.environ["WANDB_DISABLED"] = "true"
 
 
 #import IA3_lora
-from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel
+from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel, EarlyStoppingCallback
 # import sys
 # sys.path.append("..") 
 
-from model.modeling_rnalm import BertForSequenceClassification
-from model.rnalm_config import RNALMConfig
-
+from model.rnalm.modeling_rnalm import BertForSequenceClassification
+from model.rnalm.rnalm_config import RNALMConfig
+early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
     model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
@@ -146,17 +146,10 @@ class SupervisedDataset(Dataset):
         if len(data[0]) == 2:
             # data is in the format of [text, label]
             logging.warning("Perform single sequence classification...")
-            texts = [d[0] for d in data]
+            texts = [d[0].upper().replace("U", "T") for d in data]
             labels = [int(d[1]) for d in data]
-            print(type(texts))
-            #print(texts)
-            
-        elif len(data[0]) == 3:
-            # data is in the format of [text1, text2, label]
-            logging.warning("Perform sequence-pair classification...")
-            texts = [[d[0], d[1]] for d in data]
-            labels = [int(d[2]) for d in data]
         else:
+            print(len(data[0]))
             raise ValueError("Data format not supported.")
         
         if kmer != -1:
@@ -169,8 +162,13 @@ class SupervisedDataset(Dataset):
 
             if torch.distributed.get_rank() == 0:
                 torch.distributed.barrier()
+        # ensure tokenier
+        print(type(texts[0]))
         print(texts[0])
-        print(tokenizer.tokenize(texts[0]))
+        test_example = tokenizer.tokenize(texts[0])
+        print(test_example)
+        print(len(test_example))
+        print(tokenizer(texts[0]))
         output = tokenizer(
             texts,
             return_tensors="pt",
@@ -258,13 +256,14 @@ def train():
     # print(tokenizer(token_test))
     if "InstaDeepAI" in model_args.model_name_or_path:
         tokenizer.eos_token = tokenizer.pad_token
-
+    if 'mer' in training_args.token_type:
+        data_args.kmer=int(training_args.token_type[0])
     # define datasets and data collator
     train_dataset = SupervisedDataset(tokenizer=tokenizer, 
                                       data_path=os.path.join(data_args.data_path, "train.csv"), 
                                       kmer=data_args.kmer)
     val_dataset = SupervisedDataset(tokenizer=tokenizer, 
-                                     data_path=os.path.join(data_args.data_path, "dev.csv"), 
+                                     data_path=os.path.join(data_args.data_path, "val.csv"), 
                                      kmer=data_args.kmer)
     test_dataset = SupervisedDataset(tokenizer=tokenizer, 
                                      data_path=os.path.join(data_args.data_path, "test.csv"), 
@@ -315,10 +314,9 @@ def train():
                 use_alibi=model_args.use_alibi,
                 
             )
-    else:
-        if training_args.model_type == 'rnabert':
+    elif training_args.model_type == 'rnalm':
             if training_args.train_from_scratch:
-                print('Loading 6mer model')
+                
                 print('Train from scratch')
                 config = RNALMConfig.from_pretrained(model_args.model_name_or_path,
                     num_labels=train_dataset.num_labels)
@@ -326,12 +324,9 @@ def train():
                     config
                     )
             else:
-                print('Loading 6mer model')
-                #config = MMoeBertConfig.from_pretrained(model_args.model_name_or_path, cache_dir=training_args.cache_dir)
-                #config.use_flash_attn = False
+                print('Loading rnalm model')
                 print(train_dataset.num_labels)
-                #config.num_labels=train_dataset.num_labels
-                #from transformers import BertForSequenceClassification
+
                 model = BertForSequenceClassification.from_pretrained(
                     model_args.model_name_or_path,
                     #config = config,
@@ -340,22 +335,23 @@ def train():
                     #trust_remote_code=True,
                     )
             
-        else:
-            if training_args.train_from_scratch:
-                print('Loading esm model')
-                print('Train from scratch')
-                config = AutoConfig.from_pretrained(model_args.model_name_or_path,
-                    num_labels=train_dataset.num_labels)
-                model = transformers.AutoModelForSequenceClassification.from_config(
-                    config
-                    )
-            else:
-                model = transformers.AutoModelForSequenceClassification.from_pretrained(
-                    model_args.model_name_or_path,
-                    cache_dir=training_args.cache_dir,
-                    num_labels=train_dataset.num_labels,
-                    trust_remote_code=True,
+    else:
+        if training_args.train_from_scratch:
+            print('Loading esm model')
+            print('Train from scratch')
+            config = AutoConfig.from_pretrained(model_args.model_name_or_path,
+                num_labels=train_dataset.num_labels)
+            model = transformers.AutoModelForSequenceClassification.from_config(
+                config
                 )
+        else:
+            print('Loading esm model')
+            model = transformers.AutoModelForSequenceClassification.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                num_labels=train_dataset.num_labels,
+                trust_remote_code=True,
+            )
     #print(model_args,training_args)
     # configure LoRA
     if model_args.apply_lora:
@@ -387,7 +383,9 @@ def train():
                                    compute_metrics=compute_metrics,
                                    train_dataset=train_dataset,
                                    eval_dataset=val_dataset,
-                                   data_collator=data_collator)
+                                   data_collator=data_collator,
+                                   callbacks=[early_stopping],
+                                   )
     trainer.train()
 
     if training_args.save_model:
@@ -400,7 +398,7 @@ def train():
         results = trainer.evaluate(eval_dataset=test_dataset)
         print("on the test set:", results, "\n", results_path)
         os.makedirs(results_path, exist_ok=True)
-        with open(os.path.join(results_path, "eval_results.json"), "w") as f:
+        with open(os.path.join(results_path, "test_results.json"), "w") as f:
             json.dump(results, f)
          
 

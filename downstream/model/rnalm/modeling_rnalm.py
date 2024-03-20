@@ -27,7 +27,7 @@ import torch.autograd as autograd
 
 
 from transformers import PreTrainedModel
-from model.rnalm_config import RNALMConfig as BertConfig
+from .rnalm_config import RNALMConfig as BertConfig
 from transformers.utils import add_start_docstrings, add_start_docstrings_to_model_forward, add_code_sample_docstrings
 from transformers.activations import gelu, gelu_new
 #from .modeling_utils import , 

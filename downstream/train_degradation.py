@@ -30,8 +30,8 @@ from tqdm import tqdm
 
 
 from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel, EarlyStoppingCallback
-from model.modeling_rnalm import BertForSequenceRNAdegra 
-from model.rnalm_config import RNALMConfig
+from model.rnalm.modeling_rnalm import BertForSequenceRNAdegra 
+from model.rnalm.rnalm_config import RNALMConfig
 #from mmoe.modeling_bert import BertForSequenceClassification
 #from mmoe.modeling_bert_train import BertForSequenceRNAdegra 
 #from mmoe.modeling_esm import ESMForSequenceRNAdegra 
@@ -450,7 +450,8 @@ def train():
 
     if "InstaDeepAI" in model_args.model_name_or_path:
         tokenizer.eos_token = tokenizer.pad_token
-
+    if 'mer' in training_args.token_type:
+        data_args.kmer=int(training_args.token_type[0])
     # prepd_train_data = '/mnt/data/oss_beijing/multi-omics/RNA/downstream/degradation/train-val-test/train_1.json'
     # prepd_val_data = '/mnt/data/oss_beijing/multi-omics/RNA/downstream/degradation/train-val-test/val_1.json'
     # test_data = '/mnt/data/oss_beijing/multi-omics/RNA/downstream/degradation/train-val-test/test_1.json'
@@ -491,9 +492,9 @@ def train():
                         #pdb.set_trace()
                         param.requires_grad = True
    
-    elif training_args.model_type == 'rnabert':
+    elif training_args.model_type == 'rnalm':
         if training_args.train_from_scratch:
-            print('Loading 6mer model')
+            
             print('Train from scratch')
             config = RNALMConfig.from_pretrained(model_args.model_name_or_path,
                 num_labels=train_dataset.num_labels,
@@ -506,7 +507,7 @@ def train():
                 config
                 )
         else:
-            print('Loading dnabert model')
+            print('Loading rnalm model')
             #config = MMoeBertConfig.from_pretrained(model_args.model_name_or_path, cache_dir=training_args.cache_dir)
             #config.use_flash_attn = False
             print(train_dataset.num_labels)
@@ -620,3 +621,7 @@ def train():
     make_pred_file(training_args, model, [test_data_loader1, test_data_loader2],postfix=training_args.output_dir.split('/')[-1])
 if __name__ == "__main__":
     train()
+
+#how to get score:
+#submit to kaggle with command like
+#kaggle competitions submit -c stanford-covid-vaccine -f /mnt/data/oss_beijing/renyuchen/temp/ft/rna-all/degra/dna/open/dnabert1/results/dnabert_seed42/submission_dnabert1.csv -m "Message"

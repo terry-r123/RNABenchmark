@@ -3,10 +3,10 @@
 # This is your argument
 export kmer=6
 export MODEL_PATH=/mnt/data/ai4bio/renyuchen/DNABERT/examples/output/rna/base/noncoding_rna_human_6mer_1024/checkpoint-80000
-export DATA_PATH=/mnt/data/ai4bio/renyuchen/RNABenchmark/downstream/modification
+export DATA_PATH=/mnt/data/oss_beijing/multi-omics/RNA/downstream/Modification
 export OUTPUT_PATH=./outputs/ft/rna-all/modification/rna/baseline/rnalm-6mer-ape/scratch
 export STAGE=None
-export MODEL_TYPE=rnabert
+export MODEL_TYPE=rnalm
 export gpu_device="0"
 export master_port=47707
 export nproc_per_node=1
