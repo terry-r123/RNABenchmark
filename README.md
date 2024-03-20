@@ -56,12 +56,4 @@ Results can be found in "https://aicarrier.feishu.cn/sheets/KyNGs5sWoh7tGBtQ5vkc
 ## Usage
 
 run the bash scripts in the `scripts` folder
-### Problems & Bugs
 
-### Technical Details
-
-- [x] Figure out the exact procedure of the pretraining task and the finetuning task. Figure out what does each piece of code do. Figure out the data format of the input and output of each piece of code.
-- [x] Figure out how to use transformer Block to replace the Hyena Block. (Just use the config)
-- [ ] Define more downstream tasks and test the performance of the model.
-- [ ] Use vLLM (Paged Attention) to speed up and save memory
-- [ ] Use the new version of Flash Attention
