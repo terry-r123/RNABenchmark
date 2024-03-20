@@ -2018,7 +2018,7 @@ class BertForSequenceRNAdegra(BertPreTrainedModel):
             attentions=None,
         )
 
-class BertForRNAMRL(BertPreTrainedModel):
+class BertForRegression(BertPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -2080,7 +2080,7 @@ class BertForRNAMRL(BertPreTrainedModel):
                     self.config.problem_type = "single_label_classification"
                 else:
                     self.config.problem_type = "multi_label_classification"
-
+            #print(self.config.problem_type)
             if self.config.problem_type == "regression":
                 loss_fct = nn.MSELoss()
                 if self.num_labels == 1:

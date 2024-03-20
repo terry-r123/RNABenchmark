@@ -459,10 +459,10 @@ def train():
     val_dataset = SupervisedDataset(os.path.join(data_args.data_path,'val_1.json'), tokenizer, signal_noise_cutoff=1.0, test_set=None, kmer=data_args.kmer, args=training_args)
     public_test_dataset = SupervisedDataset(os.path.join(data_args.data_path,'test_1.json'), tokenizer, signal_noise_cutoff=-99.0, test_set='public', kmer=data_args.kmer, args=training_args)
     private_test_dataset = SupervisedDataset(os.path.join(data_args.data_path,'test_1.json'), tokenizer, signal_noise_cutoff=-99.0, test_set='private', kmer=data_args.kmer, args=training_args)
-    print(len(public_test_dataset))
+    #print(len(public_test_dataset))
     data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
     test_data_collator = TestDataCollatorForSupervisedDataset(tokenizer=tokenizer)
-    
+    print(f'# train: {len(train_dataset)},val:{len(val_dataset)},test:{len(private_test_dataset)}+{len(private_test_dataset)}')
 
     # load model
     # from DNA_BERT2_model.bert_layers import BertForSequenceClassification

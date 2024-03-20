@@ -79,7 +79,7 @@ class TrainingArguments(transformers.TrainingArguments):
     save_model: bool = field(default=True)
     seed: int = field(default=42)
     report_to: str = field(default="tensorboard")
-    metric_for_best_model : str = field(default="r^2")
+    metric_for_best_model : str = field(default="r^2_mean")
     stage: str = field(default='0')
     model_type: str = field(default='dna')
     token_type: str = field(default='6mer')
@@ -180,10 +180,11 @@ class SupervisedDataset(Dataset):
         # load data from the disk
         with open(data_path, "r") as f:
             data = list(csv.reader(f))[1:]
-
-        if len(data[0]) == 2:
+        
+        
+        if len(data[0]) == 4:
             texts = [d[0].upper().replace("U", "T") for d in data]          
-            labels = [float(d[1]) for d in data]
+            labels = [[float(d[i + 1])for i in range(3)] for d in data]
             
         else:
             print(len(data[0]))
@@ -219,7 +220,7 @@ class SupervisedDataset(Dataset):
         self.attention_mask = output["attention_mask"]
 
         self.labels = labels
-        self.num_labels = 1
+        self.num_labels = 3
 
     def __len__(self):
         return len(self.input_ids)
@@ -253,10 +254,19 @@ Manually calculate the mse and r^2.
 def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
     labels = labels.squeeze()
     logits = logits.squeeze()
+    labels_len = labels.shape[1]
     #print(logits.shape,labels.shape)
+    result = []
+    for i in range(labels_len):
+        correlation = scipy.stats.pearsonr(labels[:,i], logits[:,i])[0]**2
+        result.append(correlation)
     return {
     "mse": sklearn.metrics.mean_squared_error(labels, logits),
-    "r^2" : scipy.stats.pearsonr(labels, logits)[0]**2,
+    #"r^2_mean": np.mean([scipy.stats.pearsonr(labels[:,i], logits[:,i])[0]**2 for i in range(labels_len)]),
+    "r^2_mean": np.mean(result),
+    "r^2_ON": result[0],
+    "r^2_OFF": result[1],
+    "r^2_ON_OFF": result[2],
     }
 
 """
@@ -396,9 +406,7 @@ def train():
         results_test = trainer.evaluate(eval_dataset=test_dataset)
         with open(os.path.join(results_path, "test_results.json"), "w") as f:
             json.dump(results_test, f)
-        results_val = trainer.evaluate(eval_dataset=val_dataset)
-        with open(os.path.join(results_path, "val_results.json"), "w") as f:
-            json.dump(results_val, f)
+        
 
 
 if __name__ == "__main__":

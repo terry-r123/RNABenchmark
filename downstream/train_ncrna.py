@@ -270,7 +270,7 @@ def train():
                                      kmer=data_args.kmer)
     print(f'# train: {len(train_dataset)},val:{len(val_dataset)},test:{len(test_dataset)}')
     data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
-
+    print(f'# train: {len(train_dataset)},val:{len(val_dataset)},test:{len(test_dataset)}')
 
     # load model
     print(training_args.model_type)
