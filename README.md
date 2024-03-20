@@ -43,7 +43,7 @@ Data can be found in path "/mnt/data/oss_beijing/multi-omics/RNA/downstream/" on
 
 - [ ] Isoform
 
-- [ ] Programmable RNA Switches
+- [x] Programmable RNA Switches
 - [ ] CRISPR
 - [ ] Prime Edting
 
