@@ -260,13 +260,19 @@ def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
     for i in range(labels_len):
         correlation = scipy.stats.pearsonr(labels[:,i], logits[:,i])[0]**2
         result.append(correlation)
+    result_mae = []
+    for i in range(labels_len):
+        mae = sklearn.metrics.mean_absolute_error(labels[:,i], logits[:,i])
+        result_mae.append(mae)
     return {
-    "mse": sklearn.metrics.mean_squared_error(labels, logits),
-    #"r^2_mean": np.mean([scipy.stats.pearsonr(labels[:,i], logits[:,i])[0]**2 for i in range(labels_len)]),
     "r^2_mean": np.mean(result),
     "r^2_ON": result[0],
     "r^2_OFF": result[1],
     "r^2_ON_OFF": result[2],
+    "MAE_mean": np.mean(result_mae),
+    "MAE_ON": result[0],
+    "MAE_OFF": result[1],
+    "MAE_ON_OFF": result[2],
     }
 
 """
