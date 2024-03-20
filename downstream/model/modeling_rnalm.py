@@ -124,7 +124,28 @@ class RotaryEmbedding(torch.nn.Module):
             apply_rotary_pos_emb(q, self._cos_cached, self._sin_cached),
             apply_rotary_pos_emb(k, self._cos_cached, self._sin_cached),
         )
+class RMSELoss(nn.Module):
+    def __init__(self, eps=1e-6):
+        super().__init__()
+        self.mse = nn.MSELoss()
+        self.eps = eps
 
+    def forward(self, yhat, y):
+        loss = torch.sqrt(self.mse(yhat, y) + self.eps)
+        return loss
+
+
+class MCRMSELoss(nn.Module):
+    def __init__(self, num_scored=3):
+        super().__init__()
+        self.rmse = RMSELoss()
+        self.num_scored = num_scored
+
+    def forward(self, yhat, y):
+        score = 0
+        for i in range(self.num_scored):
+            score += self.rmse(yhat[:, :, i], y[:, :, i]) / self.num_scored
+        return score
 def load_tf_weights_in_bert(model, config, tf_checkpoint_path):
     """ Load tf checkpoints in a pytorch model.
     """
@@ -1997,27 +2018,89 @@ class BertForSequenceRNAdegra(BertPreTrainedModel):
             attentions=None,
         )
 
+class BertForRNAMRL(BertPreTrainedModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.num_labels = config.num_labels
+        self.config = config
+    
+        self.bert = BertModel(config)
+        classifier_dropout = (
+            config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob
+        )
+        self.dropout = nn.Dropout(classifier_dropout)
 
+        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
-class RMSELoss(nn.Module):
-    def __init__(self, eps=1e-6):
-        super().__init__()
-        self.mse = nn.MSELoss()
-        self.eps = eps
+        # Initialize weights and apply final processing
+        self.post_init()
+    def forward(
+        self,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        token_type_ids: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
+        head_mask: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+        labels: Optional[torch.Tensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        # weight_mask: Optional[bool] = None,
+        # post_token_length: Optional[bool] = None,
+    ) -> Union[Tuple[torch.Tensor], SequenceClassifierOutput]:
+        r"""
+        labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
+            Labels for computing the sequence classification/regression loss. Indices should be in `[0, ...,
+            config.num_labels - 1]`. If `config.num_labels == 1` a regression loss is computed (Mean-Square loss), If
+            `config.num_labels > 1` a classification loss is computed (Cross-Entropy).
+        """
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        
+        outputs = self.bert(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            # output_attentions=output_attentions,
+            # output_hidden_states=output_hidden_states,
+            # return_dict=return_dict,
+        )
+        final_input= outputs[1]
+        final_input = self.dropout(final_input)
+        logits = self.classifier(final_input)
+        loss = None
+        if labels is not None:
+            if self.config.problem_type is None:
+                if self.num_labels == 1:
+                    self.config.problem_type = "regression"
+                elif self.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
+                    self.config.problem_type = "single_label_classification"
+                else:
+                    self.config.problem_type = "multi_label_classification"
 
-    def forward(self, yhat, y):
-        loss = torch.sqrt(self.mse(yhat, y) + self.eps)
-        return loss
+            if self.config.problem_type == "regression":
+                loss_fct = nn.MSELoss()
+                if self.num_labels == 1:
+                    
+                    loss = loss_fct(logits.squeeze(), labels.squeeze())
+                else:
+                    loss = loss_fct(logits, labels)
+            elif self.config.problem_type == "single_label_classification":
+                loss_fct = CrossEntropyLoss()
+                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            elif self.config.problem_type == "multi_label_classification":
+                loss_fct = BCEWithLogitsLoss()
+                loss = loss_fct(logits, labels)
+        if not return_dict:
+            output = (logits,) + outputs[2:]
+            return ((loss,) + output) if loss is not None else output
+        return SequenceClassifierOutput(
+            loss=loss,
+            logits=logits,
+            hidden_states=None,
+            attentions=None,
+        )
 
-
-class MCRMSELoss(nn.Module):
-    def __init__(self, num_scored=3):
-        super().__init__()
-        self.rmse = RMSELoss()
-        self.num_scored = num_scored
-
-    def forward(self, yhat, y):
-        score = 0
-        for i in range(self.num_scored):
-            score += self.rmse(yhat[:, :, i], y[:, :, i]) / self.num_scored
-        return score
