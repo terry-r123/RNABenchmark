@@ -37,12 +37,12 @@ Data can be found in path "/mnt/data/oss_beijing/multi-omics/RNA/downstream/" on
 - [x] Vaccine Degradation Prediction
 - [x] Secondary structure prediction
 - [x] Modification Prediction
-- [] Contact map prediction
-- [] Distance map prediction
+- [ ] Contact map prediction
+- [ ] Distance map prediction
 
-- [] Splice site prediction
+- [ ] Splice site prediction
 
-- [] Isoform
+- [ ] Isoform
 
 - [x] Programmable RNA Switches
 - [ ] CRISPR
