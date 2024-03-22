@@ -270,9 +270,9 @@ def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
     "r^2_OFF": result[1],
     "r^2_ON_OFF": result[2],
     "MAE_mean": np.mean(result_mae),
-    "MAE_ON": result[0],
-    "MAE_OFF": result[1],
-    "MAE_ON_OFF": result[2],
+    "MAE_ON": result_mae[0],
+    "MAE_OFF": result_mae[1],
+    "MAE_ON_OFF": result_mae[2],
     }
 
 """
