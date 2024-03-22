@@ -30,6 +30,24 @@ Data can be found in path "/mnt/data/oss_beijing/multi-omics/RNA/downstream/" on
 - [x] Programmable RNA Switches
 - [ ] CRISPR
 - [ ] Prime Edting
+
+#### Processing
+- [x] Non-coding Function Classification
+- [x] Mean Ribosome Loading
+- [x] Vaccine Degradation Prediction
+- [x] Secondary structure prediction
+- [x] Modification Prediction
+- [] Contact map prediction
+- [] Distance map prediction
+
+- [] Splice site prediction
+
+- [] Isoform
+
+- [x] Programmable RNA Switches
+- [ ] CRISPR
+- [ ] Prime Edting
+
 #### Code
 - [x] Non-coding Function Classification
 - [x] Mean Ribosome Loading
