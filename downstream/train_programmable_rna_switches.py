@@ -30,6 +30,8 @@ from torch.utils.data import Dataset
 # )
 from model.rnalm.modeling_rnalm import BertForRegression
 from model.rnalm.rnalm_config import RNALMConfig
+from model.esm.modeling_esm import EsmForSequenceClassification
+from model.esm.esm_config import EsmConfig
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
@@ -68,7 +70,7 @@ class TrainingArguments(transformers.TrainingArguments):
     warmup_steps: int = field(default=50)
     weight_decay: float = field(default=0.01)
     learning_rate: float = field(default=1e-4)
-    save_total_limit: int = field(default=2)
+    save_total_limit: int = field(default=1)
     #lr_scheduler_type: str = field(default="cosine_with_restarts")
     load_best_model_at_end: bool = field(default=True)
     output_dir: str = field(default="output")
@@ -256,23 +258,30 @@ def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
     logits = logits.squeeze()
     labels_len = labels.shape[1]
     #print(logits.shape,labels.shape)
+    #result_R2 =[]
     result = []
     for i in range(labels_len):
         correlation = scipy.stats.pearsonr(labels[:,i], logits[:,i])[0]**2
+        #R2 = sklearn.metrics.r2_score(labels[:,i], logits[:,i])
         result.append(correlation)
+        #result_R2.append(R2)
     result_mae = []
     for i in range(labels_len):
         mae = sklearn.metrics.mean_absolute_error(labels[:,i], logits[:,i])
         result_mae.append(mae)
     return {
-    "r^2_mean": np.mean(result),
+    #"R^2": np.mean(result_R2),  
+    #"R^2_ON": result_R2[0],
+    #"R^2_OFF": result_R2[1],
+    #"R^2_ON_OFF": result_R2[2],
     "r^2_ON": result[0],
     "r^2_OFF": result[1],
     "r^2_ON_OFF": result[2],
-    "MAE_mean": np.mean(result_mae),
+    "r^2_mean": np.mean(result),
     "MAE_ON": result_mae[0],
     "MAE_OFF": result_mae[1],
     "MAE_ON_OFF": result_mae[2],
+    "MAE_mean": np.mean(result_mae),
     }
 
 """
@@ -341,8 +350,6 @@ def train():
                 )
         else:
             print('Loading rnalm model')
-            #config = MMoeBertConfig.from_pretrained(model_args.model_name_or_path, cache_dir=training_args.cache_dir)
-            #config.use_flash_attn = False
             print(train_dataset.num_labels)
             #config.num_labels=train_dataset.num_labels
             #from transformers import BertForSequenceClassification
@@ -355,6 +362,25 @@ def train():
                 problem_type="regression",
                 token_type=training_args.token_type,
                 )
+    elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm':
+        if training_args.train_from_scratch:
+            print('Loading esm model')
+            print('Train from scratch')
+            config = AutoConfig.from_pretrained(model_args.model_name_or_path,
+                num_labels=train_dataset.num_labels)
+            model = transformers.AutoModelForSequenceClassification.from_config(
+                config
+                )
+        else:
+            print(training_args.model_type)
+            print(f'Loading {training_args.model_type} model')
+            model = EsmForSequenceClassification.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                num_labels=train_dataset.num_labels,
+                problem_type="regression",
+                trust_remote_code=True,
+            )        
     elif training_args.model_type == 'hyena':
         backbone_cfg = None
         if training_args.train_from_scratch:

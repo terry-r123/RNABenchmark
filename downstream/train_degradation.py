@@ -36,7 +36,8 @@ from model.rnalm.rnalm_config import RNALMConfig
 #from mmoe.modeling_bert_train import BertForSequenceRNAdegra 
 #from mmoe.modeling_esm import ESMForSequenceRNAdegra 
 #from hyena_dna.standalone_hyenadna import HyenaForRNADegraPre, CharacterTokenizer
-
+from model.esm.modeling_esm import ESMForSequenceRNAdegra
+from model.esm.esm_config import EsmConfig
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
@@ -76,7 +77,7 @@ class TrainingArguments(transformers.TrainingArguments):
     weight_decay: float = field(default=0.01)
     learning_rate: float = field(default=1e-4)
     save_total_limit: int = field(default=2)
-    lr_scheduler_type: str = field(default="cosine_with_restarts")
+    #lr_scheduler_type: str = field(default="cosine_with_restarts")
     load_best_model_at_end: bool = field(default=True)
     output_dir: str = field(default="output")
     find_unused_parameters: bool = field(default=False)
@@ -194,6 +195,7 @@ def bpe_position(texts,attn_mask, tokenizer):
     print(position_id)
     print('position_id.shape',position_id.shape)
     return position_id
+
 class SupervisedDataset(Dataset):
 
     def __init__(self, data_path, tokenizer,signal_noise_cutoff, test_set=None, kmer=-1,args=None):
@@ -213,15 +215,8 @@ class SupervisedDataset(Dataset):
         self.sample_ids = self.df['id'].values
         self.X = np.stack(self.df['train_tensor'].values)
         #texts = self.df['sequence'].values
-        texts = [d.replace('U', 'T') for d in self.df['sequence']]
-        
-        print('len(text)',len(texts))
-        #print(texts.shape)
-        print('pre-texts',type(texts))
-        #print(texts)
-        print('texts[0]',texts[0])
-        # print(type(texts[0]))
-        # print(len(texts[0]))
+        texts = [d.upper().replace("U", "T") for d in self.df['sequence']]
+               
         #self.id_to_bp_mat_map = self.load_bp_mats()
         seq_length = len(texts[0])
         if kmer != -1:
@@ -234,11 +229,13 @@ class SupervisedDataset(Dataset):
 
             if torch.distributed.get_rank() == 0:
                 torch.distributed.barrier()
-        print('post-texts',type(texts))
-        print('len(text)',len(texts))
+        # ensure tokenier
+        print(type(texts[0]))
         print(texts[0])
-        print(tokenizer.tokenize(texts[0]))
-        print(tokenizer)
+        test_example = tokenizer.tokenize(texts[0])
+        print(test_example)
+        print(len(test_example))
+        print(tokenizer(texts[0]))
         output = tokenizer(
             texts,
             return_tensors="pt",
@@ -251,58 +248,34 @@ class SupervisedDataset(Dataset):
         #make sure the length of sequences in the dataset is the same
         self.weight_mask = torch.ones((self.input_ids.shape[0],seq_length+2))
         #print('------------------',self.weight_mask.shape)
-        #if args.token_type == 'bpe':
-        
-        print('self.input_ids',self.input_ids.shape)
-        print(self.input_ids[0])
-        print(type(self.input_ids))
+
         self.attention_mask = output["attention_mask"]
-        print(self.attention_mask[0])
+        #print(self.attention_mask[0])
         if args.token_type == '6mer':
             for i in range(1,5):
                 self.weight_mask[:,i+1]=self.weight_mask[:,-i-2]=1/(i+1) 
             self.weight_mask[:, 6:-6] = 1/6
-        self.position_id = torch.zeros(self.attention_mask.shape)
+        self.post_token_length = torch.zeros(self.attention_mask.shape)
         if args.token_type == 'bpe':
-            self.position_id = bpe_position(self.texts,self.attention_mask,tokenizer)
+            self.post_token_length = bpe_position(self.texts,self.attention_mask,tokenizer)
         #self.weight_mask = torch.cat([torch.ones((self.input_ids.shape[0],1)),self.weight_mask,torch.ones((self.input_ids.shape[0],1))],dim=1) #add [cls] [sep]
         #print(self.weight_mask)
         #print(self.position_id)
         self.num_labels = 3
     def __getitem__(self, index: int):
-        seq_adj = None
-        bp_adj = None
         if self.is_test:
             #print(self.sample_ids.shape,self.input_ids.shape,self.attention_mask.shape)
-
             sample_id = self.sample_ids[index]
             return dict(input_ids=self.input_ids[index], sample_ids=sample_id, attention_mask=self.attention_mask[index],
-                head_mask=self.weight_mask[index],position_ids=self.position_id[index])
+                weight_mask=self.weight_mask[index],post_token_length=self.post_token_length[index])
         #print('self.texts[index]',self.texts[index])
         targets = torch.tensor(self.y[index, :, :], dtype=torch.float32)
         return dict(input_ids=self.input_ids[index], labels=targets, attention_mask=self.attention_mask[index],
-           head_mask=self.weight_mask[index],position_ids=self.position_id[index])
-        #return dict(input_ids=self.input_ids[index], labels=targets, attention_mask=self.attention_mask[index])
-       # return x, targets, seq_adj, bp_adj
-
-#     @staticmethod
-#     def get_sequence_adjacency(size):
-#         r_shift = np.pad(np.identity(size), ((0, 0), (1, 0)), mode='constant')[:, :-1]
-#         l_shift = np.pad(np.identity(size), ((0, 0), (0, 1)), mode='constant')[:, 1:]
-#         return torch.tensor(r_shift + l_shift, dtype=torch.float32)
-
-#     def get_base_pair_adjacency(self, sample_id):
-#         return self.id_to_bp_mat_map[sample_id]
-
-#     def load_bp_mats(self):
-#         res = {}
-#         for sid in self.sample_ids:
-#             res[sid] = torch.tensor(np.load('/mnt/data/oss_beijing/multi-omics/RNA/downstream/degradation/bpps/' + sid + '.npy'), dtype=torch.float32)
-#         return res
+           weight_mask=self.weight_mask[index],post_token_length=self.post_token_length[index])
+     
     
     def __len__(self) -> int:
         return self.df.shape[0]
-
 @dataclass
 class TestDataCollatorForSupervisedDataset(object):
     """Collate examples for supervised fine-tuning."""
@@ -310,27 +283,19 @@ class TestDataCollatorForSupervisedDataset(object):
     tokenizer: transformers.PreTrainedTokenizer
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        input_ids, sample_ids, attention_mask, weight_mask, post_token_length = tuple([instance[key] for instance in instances] for key in ("input_ids" ,"sample_ids", "attention_mask","head_mask","position_ids"))
-        #print(type(input_ids))
-        #print(len(input_ids))
+        input_ids, labels, attention_mask, weight_mask, post_token_length  = tuple([instance[key] for instance in instances] for key in ("input_ids" ,"labels", "attention_mask","weight_mask","post_token_length"))
         input_ids = torch.stack(input_ids)
-        #input_ids = torch.cat(input_ids)
-        #print(type(input_ids))
-        #print(input_ids.shape)
-        #print(type(labels))
-        #print(type(attention_mask))
-        #labels = torch.stack(labels)
         attention_mask = torch.stack(attention_mask)
         weight_mask = torch.stack(weight_mask)
         post_token_length = torch.stack(post_token_length)
-        attention_mask = torch.cat([attention_mask,weight_mask,post_token_length],dim=1)
+        #attention_mask = torch.cat([attention_mask,weight_mask,post_token_length],dim=1)
         
         return dict(
             input_ids=input_ids,
             sample_ids=sample_ids,
             attention_mask=attention_mask,
-            #weight_mask=weight_mask,
-            #post_token_length=post_token_length
+            weight_mask=weight_mask,
+            post_token_length=post_token_length
         )
 @dataclass
 class DataCollatorForSupervisedDataset(object):
@@ -340,7 +305,7 @@ class DataCollatorForSupervisedDataset(object):
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         #print(instances)
-        input_ids, labels, attention_mask, weight_mask, post_token_length  = tuple([instance[key] for instance in instances] for key in ("input_ids" ,"labels", "attention_mask","head_mask","position_ids"))
+        input_ids, labels, attention_mask, weight_mask, post_token_length  = tuple([instance[key] for instance in instances] for key in ("input_ids" ,"labels", "attention_mask","weight_mask","post_token_length"))
         input_ids = torch.stack(input_ids)
         labels = torch.stack(labels)
         attention_mask = torch.stack(attention_mask)
@@ -348,14 +313,14 @@ class DataCollatorForSupervisedDataset(object):
         post_token_length = torch.stack(post_token_length)
         #print(input_ids.shape,post_token_length.shape)
         #print(weight_mask.shape,attention_mask.shape,labels.shape)
-        attention_mask = torch.cat([attention_mask,weight_mask,post_token_length],dim=1)
+        #attention_mask = torch.cat([attention_mask,weight_mask,post_token_length],dim=1)
         #print(weight_mask.shape,attention_mask.shape,labels.shape)
         return dict(
             input_ids=input_ids,
             labels=labels,
             attention_mask=attention_mask,
-            #weight_mask=weight_mask,
-            #post_token_length=post_token_length
+            weight_mask=weight_mask,
+            post_token_length=post_token_length
         )
 
 def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
@@ -399,15 +364,10 @@ def make_pred_file(args, model, loaders, postfix=''):
             input_ids = batch["input_ids"].to(args.device)
             attention_mask = batch["attention_mask"].to(args.device)
             sample_ids = batch["sample_ids"]
-            # weight_mask = batch["weight_mask"]
-            # post_token_length = batch["post_token_length"]
-            #total_mask_dim = attention_mask.shape[1]
-            #cur_length = int((total_mask_dim-5)/3)
-            #print(cur_length)
-            #attention_mask, weight_mask, post_token_length = torch.split(attention_mask, (cur_length,cur_length+5,cur_length), dim=1)
-
+            weight_mask = batch["weight_mask"]
+            post_token_length = batch["post_token_length"]
             with torch.no_grad():
-                test_pred = model(input_ids=input_ids, attention_mask=attention_mask)#,weight_mask=weight_mask, post_token_length=post_token_length)
+                test_pred = model(input_ids=input_ids, attention_mask=attention_mask,weight_mask=weight_mask, post_token_length=post_token_length)
                 # print(len(outputs))
                 #print(test_pred[0].shape)
                 test_pred = test_pred[0][:, 1:-1,:] #exclude [cls] and [sep]
@@ -523,27 +483,27 @@ def train():
                 token_type=training_args.token_type,
                 )
             
-    elif training_args.model_type == 'esm-rna':
+    elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm-rna':
         if training_args.train_from_scratch:
-            print('Loading esm model')
+            print(f'Loading {training_args.model_type} model')
             print('Train from scratch')
-            config = MMoeBertConfig.from_pretrained(model_args.model_name_or_path,
-                num_labels=train_dataset.num_labels,
-                problem_type="regression",
-                token_type=training_args.token_type,
-                )
-            print(config)
+            config = AutoConfig.from_pretrained(model_args.model_name_or_path,
+                num_labels=train_dataset.num_labels)
             model = ESMForSequenceRNAdegra(
                 config
                 )
         else:
+            print(training_args.model_type)
+            print(f'Loading {training_args.model_type} model')
             model = ESMForSequenceRNAdegra.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
                 num_labels=train_dataset.num_labels,
+                problem_type="regression",
+                token_type=training_args.token_type,
                 trust_remote_code=True,
-                problem_type="regression"
-            )
+            )        
+   
     elif training_args.model_type == 'dnabert2':
         if training_args.train_from_scratch:
             pass

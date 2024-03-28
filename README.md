@@ -29,7 +29,7 @@ Data can be found in path "/mnt/data/oss_beijing/multi-omics/RNA/downstream/" on
 
 - [x] Programmable RNA Switches
 - [ ] CRISPR
-- [ ] Prime Edting
+- [ ] Prime Editing
 
 #### Processing
 - [x] Non-coding Function Classification
@@ -46,7 +46,7 @@ Data can be found in path "/mnt/data/oss_beijing/multi-omics/RNA/downstream/" on
 
 - [x] Programmable RNA Switches
 - [ ] CRISPR
-- [ ] Prime Edting
+- [ ] Prime Editing
 
 #### Code
 - [x] Non-coding Function Classification
@@ -63,7 +63,7 @@ Data can be found in path "/mnt/data/oss_beijing/multi-omics/RNA/downstream/" on
 
 - [x] Programmable RNA Switches
 - [ ] CRISPR
-- [ ] Prime Edting
+- [ ] Prime Editing
 
 
 ### Analysis

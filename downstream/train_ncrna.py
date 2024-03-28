@@ -25,6 +25,9 @@ from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer,
 
 from model.rnalm.modeling_rnalm import BertForSequenceClassification
 from model.rnalm.rnalm_config import RNALMConfig
+from model.esm.modeling_esm import EsmForSequenceClassification
+from model.esm.esm_config import EsmConfig
+from model.rnabert.modeling_rnabert import RnaBertForSequenceClassification
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
@@ -169,24 +172,26 @@ class SupervisedDataset(Dataset):
         print(test_example)
         print(len(test_example))
         print(tokenizer(texts[0]))
-        output = tokenizer(
-            texts,
-            return_tensors="pt",
-            padding="longest",
-            max_length=tokenizer.model_max_length,
-            truncation=True,
-        )
+        # output = tokenizer(
+        #     texts,
+        #     return_tensors="pt",
+        #     padding="longest",
+        #     max_length=tokenizer.model_max_length,
+        #     truncation=True,
+        # )
 
-        self.input_ids = output["input_ids"]
-        self.attention_mask = output["attention_mask"]
+        # self.input_ids = output["input_ids"]
+        # self.attention_mask = output["attention_mask"]
         self.labels = labels
         self.num_labels = len(set(labels))
+        self.texts = texts
 
     def __len__(self):
-        return len(self.input_ids)
+       return len(self.texts)
 
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
-        return dict(input_ids=self.input_ids[i], labels=self.labels[i])
+        #return dict(input_ids=self.input_ids[i], labels=self.labels[i])
+        return dict(input_ids=self.texts[i], labels=self.labels[i])
 
 
 @dataclass
@@ -196,17 +201,24 @@ class DataCollatorForSupervisedDataset(object):
     tokenizer: transformers.PreTrainedTokenizer
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        input_ids, labels = tuple([instance[key] for instance in instances] for key in ("input_ids", "labels"))
-        #print('1',input_ids[0].shape)
-        input_ids = torch.nn.utils.rnn.pad_sequence(
-            input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
-        )
+        # input_ids, labels = tuple([instance[key] for instance in instances] for key in ("input_ids", "labels"))
+        # #print('1',input_ids[0].shape)
+        # input_ids = torch.nn.utils.rnn.pad_sequence(
+        #     input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
+        # )
+        seqs, labels = tuple([instance[key] for instance in instances] for key in ("input_ids", "labels"))
+        
+        output = self.tokenizer(seqs, padding='longest', max_length=self.tokenizer.model_max_length, truncation=True, return_tensors='pt')
+        input_ids = output["input_ids"]
+        attention_mask = output["attention_mask"]
+        #attention_mask = input_ids.ne(self.tokenizer.pad_token_id)
+        #print(sum(attention_mask==input_ids.ne(self.tokenizer.pad_token_id)))
         #print('2',input_ids[0].shape)
         labels = torch.Tensor(labels).long()
         return dict(
             input_ids=input_ids,
             labels=labels,
-            attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
+            attention_mask=attention_mask,
         )
 
 """
@@ -241,6 +253,43 @@ def train():
     # load tokenizer
     if training_args.model_type == 'esm-open':
         tokenizer = EsmTokenizer.from_pretrained("/mnt/data/ai4bio/renyuchen/DNABERT/examples/rna_finetune/ssp/vocab_esm_mars.txt")
+    elif training_args.model_type == 'rnabert':
+        tokenizer = EsmTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=True,
+            # trust_remote_code=True,
+        )
+        # print(tokenizer,len(tokenizer))
+        # vocab = tokenizer.get_vocab()  # 或者直接访问 tokenizer.vocab（如果存在）
+
+        # # 打印词表的token及其索引
+        # for token, index in vocab.items():
+        #     print(f"{token}: {index}")
+
+        # # 打印词表大小
+        # print(f"Total number of tokens in vocabulary: {len(vocab)}")
+        # tokens = ['<cls>','A', 'A', 'G', 'A', 'A', 'T', 'C', 'A','<sep>']
+        # token_ids = tokenizer.convert_tokens_to_ids(tokens)
+
+        # print(token_ids)
+        # # special_tokens_dict = {
+        # #     'additional_special_tokens': ['<cls>', '<eos>', '<unk>']
+        # # }
+
+        # # # 添加特殊token
+        # # num_added_toks = tokenizer.add_special_tokens(special_tokens_dict)
+        # print(tokenizer,len(tokenizer))
+        # vocab = tokenizer.get_vocab()  # 或者直接访问 tokenizer.vocab（如果存在）
+
+        # # 打印词表的token及其索引
+        # for token, index in vocab.items():
+        #     print(f"{token}: {index}")
+
+        # # 打印词表大小
+        # print(f"Total number of tokens in vocabulary: {len(vocab)}")
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
@@ -250,6 +299,8 @@ def train():
             use_fast=True,
             # trust_remote_code=True,
         )
+
+    
     # token_test = "ATCGGCAGTACAGCGATTTGACGAT"
     # print(token_test)
     # print(tokenizer.tokenize(token_test))
@@ -334,7 +385,41 @@ def train():
                     num_labels=train_dataset.num_labels,
                     #trust_remote_code=True,
                     )
-            
+    elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm-rna':
+        if training_args.train_from_scratch:
+            print(f'Loading {training_args.model_type} model')
+            print('Train from scratch')
+            config = AutoConfig.from_pretrained(model_args.model_name_or_path,
+                num_labels=train_dataset.num_labels)
+            model = transformers.AutoModelForSequenceClassification.from_config(
+                config
+                )
+        else:
+            print(training_args.model_type)
+            print(f'Loading {training_args.model_type} model')
+            model = EsmForSequenceClassification.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                num_labels=train_dataset.num_labels,
+                trust_remote_code=True,
+            )        
+    elif training_args.model_type == 'rnabert':
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = RnaBertForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            trust_remote_code=True,
+        )        
+        embedding_dim = model.bert.embeddings.word_embeddings.weight.size()
+
+        print(f"Embedding dimension: {embedding_dim}")
+        # 扩展模型嵌入以匹配新词表大小
+        model.resize_token_embeddings(len(tokenizer))
+        embedding_dim = model.bert.embeddings.word_embeddings.weight.size()
+        print(f"Embedding dimension: {embedding_dim}")
+        
     else:
         if training_args.train_from_scratch:
             print('Loading esm model')

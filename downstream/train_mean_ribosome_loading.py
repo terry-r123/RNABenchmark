@@ -30,6 +30,8 @@ from torch.utils.data import Dataset
 # )
 from model.rnalm.modeling_rnalm import BertForRegression
 from model.rnalm.rnalm_config import RNALMConfig
+from model.esm.modeling_esm import EsmForSequenceClassification
+
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
@@ -258,7 +260,6 @@ def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
     "mse": sklearn.metrics.mean_squared_error(labels, logits),
     "r^2" : scipy.stats.pearsonr(labels, logits)[0]**2,
     }
-
 """
 Compute metrics used for huggingface trainer.
 """
@@ -280,6 +281,15 @@ def train():
             add_special_tokens=False,  # we handle special tokens elsewhere
             padding_side='left', # since HyenaDNA is causal, we pad on the left
         )
+    elif training_args.model_type == 'rna-fm':
+        tokenizer = EsmTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=True,
+            trust_remote_code=True,
+        )
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
@@ -289,7 +299,7 @@ def train():
             use_fast=True,
             trust_remote_code=True,
         )
-
+    
     if "InstaDeepAI" in model_args.model_name_or_path:
         tokenizer.eos_token = tokenizer.pad_token
     if 'mer' in training_args.token_type:
@@ -356,7 +366,19 @@ def train():
                 problem_type="regression",
                 #token_type=training_args.token_type,
             )
-
+    elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm':
+        if training_args.train_from_scratch:
+            pass
+        else:
+            print(training_args.model_type)
+            print(f'Loading {training_args.model_type} model')
+            model = EsmForSequenceClassification.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                num_labels=train_dataset.num_labels,
+                problem_type="regression",
+                trust_remote_code=True,
+            )    
 
     # configure LoRA
     if model_args.use_lora:
