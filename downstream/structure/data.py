@@ -18,18 +18,22 @@ class SSDataset(Dataset):
         print(f'len of dataset: {len(self.df)}')
         if args:
             self.args = args
-        token_test = df.iloc[0]['seq'].replace('U', 'T')
-        if self.args.token_type == '6mer':
-            token_test = generate_kmer_str(token_test, 6)
+        token_test = df.iloc[0]['seq'].upper().replace("U", "T")
+        if 'mer' in self.args.token_type:
+            token_test = generate_kmer_str(token_test, int(self.args.token_type[0]))
         print(token_test)
-        print(tokenizer.tokenize(token_test))
+        test_example = tokenizer.tokenize(token_test)
+        print(test_example)
+        print(tokenizer(token_test))
     def __len__(self):
         return len(self.df)
 
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
         seq = row['seq']
-        seq = seq.replace('U', 'T')
+        seq = seq.upper().replace("U", "T")
+        # if 'mer' in self.args.token_type:
+        #     seq = generate_kmer_str(seq, int(self.args.token_type[0]))
         # if self.args.token_type == '6mer':
         #     seq = generate_kmer_str(seq, 6)
             #print(seq)

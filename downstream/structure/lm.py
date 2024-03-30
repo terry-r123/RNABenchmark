@@ -8,8 +8,8 @@ import transformers
 import sys
 sys.path.append("..") 
 #from dna_module.tokenization_dna import DNATokenizer
-from model.rnalm_config import RNALMConfig
-from model.modeling_rnalm import BertModel as FlashBertModel
+from model.rnalm.rnalm_config import RNALMConfig
+from model.rnalm.modeling_rnalm import BertModel as FlashBertModel
 #from dnabert2_source.bert_layers import BertModel as DNABERT2
 
 def get_extractor(args):
@@ -26,11 +26,19 @@ def get_extractor(args):
                  '35m-1B' : 'esm35m_1B',
                  '150m-1B': 'esm150m_1B'
                  }
-    if args.model_type == 'esm-rna':
-        assert args.model_scale in name_dict.keys(), print(f'args.model_scale should be in {name_dict.keys()}')
+    if args.model_type == 'rna-fm' or args.model_type == 'esm-rna':
+        #assert args.model_scale in name_dict.keys(), print(f'args.model_scale should be in {name_dict.keys()}')
 
         #extractor = EsmModel.from_pretrained(f'{args.pretrained_lm_dir}/{name_dict[args.model_scale]}/')
-        tokenizer = EsmTokenizer.from_pretrained("/mnt/data/ai4bio/renyuchen/DNABERT/examples/rna_finetune/ssp/vocab_esm_mars.txt")
+        #tokenizer = EsmTokenizer.from_pretrained("/mnt/data/ai4bio/renyuchen/DNABERT/examples/rna_finetune/ssp/vocab_esm_mars.txt")
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            args.model_name_or_path,
+            cache_dir=args.cache_dir,
+            model_max_length=args.model_max_length,
+            padding_side="right",
+            use_fast=True,
+            trust_remote_code=True,
+        )
         if args.train_from_scratch:
             print('Loading esm model')
             print('Train from scratch')
@@ -85,7 +93,7 @@ def get_extractor(args):
             extractor = DNABERT2.from_pretrained(
             args.model_name_or_path,
             )    
-    elif args.model_type == 'rnabert':
+    elif args.model_type == 'rnalm':
         print('yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy')
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             args.model_name_or_path,

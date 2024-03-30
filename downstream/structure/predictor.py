@@ -30,7 +30,7 @@ class SSCNNPredictor(nn.Module):
         #print(output[0].size())
         #pdb.set_trace()
         #print(dir(output))
-        if self.args.model_type == 'esm-rna':
+        if self.args.model_type == 'rna-fm' or self.args.model_type == 'esm-rna':
             hidden_states = output.last_hidden_state
             
         elif self.args.model_type == 'dnabert':

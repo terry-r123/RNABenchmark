@@ -126,14 +126,14 @@ def main(args):
         df_train = df[df['data_name'] == 'TR0'].reset_index(drop=True)
         df_val = df[df['data_name'] == 'VL0'].reset_index(drop=True)
         df_test = df[df['data_name'] == 'TS0'].reset_index(drop=True)
-        if args.non_n:
-            train_dataset = SSDataset(df_train, data_path=f'{args.bprna_dir}/TR0', tokenizer=tokenizer, args=args)
-            val_dataset = SSDataset(df_val, data_path=f'{args.bprna_dir}/VL0', tokenizer=tokenizer, args=args)
-            test_dataset = SSDataset(df_test, data_path=f'{args.bprna_dir}/TS0', tokenizer=tokenizer, args=args)
-        else:
-            train_dataset = SSDataset(df_train, data_path=f'{args.bprna_dir}/ct/TR0', tokenizer=tokenizer, args=args)
-            val_dataset = SSDataset(df_val, data_path=f'{args.bprna_dir}/ct/VL0', tokenizer=tokenizer, args=args)
-            test_dataset = SSDataset(df_test, data_path=f'{args.bprna_dir}/ct/TS0', tokenizer=tokenizer, args=args)
+        
+        train_dataset = SSDataset(df_train, data_path=f'{args.bprna_dir}/TR0', tokenizer=tokenizer, args=args)
+        val_dataset = SSDataset(df_val, data_path=f'{args.bprna_dir}/VL0', tokenizer=tokenizer, args=args)
+        test_dataset = SSDataset(df_test, data_path=f'{args.bprna_dir}/TS0', tokenizer=tokenizer, args=args)
+        # else:
+        #     train_dataset = SSDataset(df_train, data_path=f'{args.bprna_dir}/ct/TR0', tokenizer=tokenizer, args=args)
+        #     val_dataset = SSDataset(df_val, data_path=f'{args.bprna_dir}/ct/VL0', tokenizer=tokenizer, args=args)
+        #     test_dataset = SSDataset(df_test, data_path=f'{args.bprna_dir}/ct/TS0', tokenizer=tokenizer, args=args)
     elif args.mode == 'pdb':
         df = pd.read_csv(f'{args.pdb_dir}/pdbRNA.csv')
 
@@ -144,6 +144,8 @@ def main(args):
         train_dataset = SSDataset(df_pdb_train, data_path=f'{args.pdb_dir}/ct', tokenizer=tokenizer, args=args)
         val_dataset = SSDataset(df_pdb_val, data_path=f'{args.pdb_dir}/ct', tokenizer=tokenizer, args=args)
         test_dataset = SSDataset(df_pdb_test, data_path=f'{args.pdb_dir}/ct', tokenizer=tokenizer, args=args)
+    
+    print(f'# train: {len(train_dataset)},val:{len(val_dataset)},test:{len(test_dataset)}')
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers,
                               collate_fn=collate_fn)
@@ -280,13 +282,13 @@ def main(args):
 
         if best_val < np.mean(val_precision_list) + np.mean(val_recall_list) + np.mean(val_f1_list):
             best_val = np.mean(val_precision_list) + np.mean(val_recall_list) + np.mean(val_f1_list)
-            if accelerator.is_main_process:
-                accelerator.save_state(f'{ckpt_path}/best_val')
+            # if accelerator.is_main_process:
+            #     accelerator.save_state(f'{ckpt_path}/best_val')
 
         if best_test < np.mean(test_precision_list) + np.mean(test_recall_list) + np.mean(test_f1_list):
             best_test = np.mean(test_precision_list) + np.mean(test_recall_list) + np.mean(test_f1_list)
-            if accelerator.is_main_process:
-                accelerator.save_state(f'{ckpt_path}/best_test')
+            # if accelerator.is_main_process:
+            #     accelerator.save_state(f'{ckpt_path}/best_test')
 
         end_time = time.time()
 
