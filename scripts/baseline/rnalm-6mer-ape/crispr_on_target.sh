@@ -3,11 +3,11 @@
 # This is your argument
 export kmer=6
 export MODEL_PATH=/mnt/data/ai4bio/renyuchen/RNABenchmark/model/rnalm/config/rnalm-6mer-ape
-export DATA_PATH=/mnt/data/oss_beijing/multi-omics/RNA/downstream/MeanRibosomeLoading
-export OUTPUT_PATH=./outputs/ft/rna-all/MeanRibosomeLoading/rna/baseline/rnalm-6mer-ape/scratch
+export DATA_PATH=/mnt/data/oss_beijing/multi-omics/RNA/downstream/CRISPROnTarget/HL60/
+export OUTPUT_PATH=./outputs/ft/rna-all/CRISPROnTarget/rna/baseline/rnalm-6mer-ape/scratch
 export STAGE=None
 export MODEL_TYPE=rnalm
-export gpu_device="2"
+export gpu_device="0"
 export master_port=41824
 export nproc_per_node=1
 export batch_size=32
@@ -22,7 +22,7 @@ do
     CUDA_VISIBLE_DEVICES=$gpu_device torchrun \
         --nproc_per_node $nproc_per_node \
         --master_port $master_port \
-        downstream/train_mean_ribosome_loading.py \
+        downstream/train_crispr_on_target.py \
             --model_name_or_path $MODEL_PATH \
             --data_path  $DATA_PATH/$data \
             --kmer ${kmer} \
