@@ -28,13 +28,12 @@ import math
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
-
+import sys
+sys.path.append("..")
 from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel, EarlyStoppingCallback
-from model.rnalm.modeling_rnalm import BertForSequenceRNAdegra 
-from model.rnalm.rnalm_config import RNALMConfig
-#from mmoe.modeling_bert import BertForSequenceClassification
-#from mmoe.modeling_bert_train import BertForSequenceRNAdegra 
-#from mmoe.modeling_esm import ESMForSequenceRNAdegra 
+from RNABenchmark.model.rnalm.modeling_rnalm import BertForSequenceRNAdegra 
+from RNABenchmark.model.rnalm.rnalm_config import RNALMConfig
+
 #from hyena_dna.standalone_hyenadna import HyenaForRNADegraPre, CharacterTokenizer
 from model.esm.modeling_esm import ESMForSequenceRNAdegra
 from model.esm.esm_config import EsmConfig
@@ -76,7 +75,7 @@ class TrainingArguments(transformers.TrainingArguments):
     warmup_steps: int = field(default=50)
     weight_decay: float = field(default=0.01)
     learning_rate: float = field(default=1e-4)
-    save_total_limit: int = field(default=2)
+    save_total_limit: int = field(default=1)
     #lr_scheduler_type: str = field(default="cosine_with_restarts")
     load_best_model_at_end: bool = field(default=True)
     output_dir: str = field(default="output")
@@ -86,7 +85,7 @@ class TrainingArguments(transformers.TrainingArguments):
     eval_and_save_results: bool = field(default=True)
     save_model: bool = field(default=False)
     seed: int = field(default=42)
-    report_to: str = field(default="wandb")
+    report_to: str = field(default="tensorboard")
     metric_for_best_model : str = field(default="mcrmse")
     greater_is_better: bool = field(default=False)
     stage: str = field(default='0')
@@ -185,14 +184,20 @@ def load_or_generate_kmer(data_path: str, texts: List[str], k: int, is_test_set=
 
 def bpe_position(texts,attn_mask, tokenizer):
     position_id = torch.zeros(attn_mask.shape)
-    for i,text in enumerate(texts):
-        #print(text)
+    # print(texts[0])
+    # print(tokenizer.tokenize(texts[0]))
+    for i,text in enumerate(texts):   
         text = tokenizer.tokenize(text)
-        #print(text)
+        position_id[:, 0] = 1
+        index = 0
         for j, token in enumerate(text):
-            position_id[i,j] = len(token)    
-        #print(tokenizer)  
-    print(position_id)
+            index = j+1
+            position_id[i,index] = len(token) #start after [cls]   
+            # if i == 0:
+            #     print(token,position_id[i,index],i,index,len(token))
+        position_id[i, index+1] = 1
+        
+    print(position_id[0,:])
     print('position_id.shape',position_id.shape)
     return position_id
 
@@ -213,7 +218,7 @@ class SupervisedDataset(Dataset):
             self.y = np.stack([np.stack(self.df[col].values) for col in deg_cols], axis=-1)
         print('post',self.df.shape)
         self.sample_ids = self.df['id'].values
-        self.X = np.stack(self.df['train_tensor'].values)
+        #self.X = np.stack(self.df['train_tensor'].values)
         #texts = self.df['sequence'].values
         texts = [d.upper().replace("U", "T") for d in self.df['sequence']]
                
@@ -258,9 +263,6 @@ class SupervisedDataset(Dataset):
         self.post_token_length = torch.zeros(self.attention_mask.shape)
         if args.token_type == 'bpe':
             self.post_token_length = bpe_position(self.texts,self.attention_mask,tokenizer)
-        #self.weight_mask = torch.cat([torch.ones((self.input_ids.shape[0],1)),self.weight_mask,torch.ones((self.input_ids.shape[0],1))],dim=1) #add [cls] [sep]
-        #print(self.weight_mask)
-        #print(self.position_id)
         self.num_labels = 3
     def __getitem__(self, index: int):
         if self.is_test:
@@ -283,7 +285,7 @@ class TestDataCollatorForSupervisedDataset(object):
     tokenizer: transformers.PreTrainedTokenizer
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        input_ids, labels, attention_mask, weight_mask, post_token_length  = tuple([instance[key] for instance in instances] for key in ("input_ids" ,"labels", "attention_mask","weight_mask","post_token_length"))
+        input_ids, sample_ids, attention_mask, weight_mask, post_token_length = tuple([instance[key] for instance in instances] for key in ("input_ids" ,"sample_ids", "attention_mask","weight_mask","post_token_length"))
         input_ids = torch.stack(input_ids)
         attention_mask = torch.stack(attention_mask)
         weight_mask = torch.stack(weight_mask)
@@ -364,8 +366,8 @@ def make_pred_file(args, model, loaders, postfix=''):
             input_ids = batch["input_ids"].to(args.device)
             attention_mask = batch["attention_mask"].to(args.device)
             sample_ids = batch["sample_ids"]
-            weight_mask = batch["weight_mask"]
-            post_token_length = batch["post_token_length"]
+            weight_mask = batch["weight_mask"].to(args.device)
+            post_token_length = batch["post_token_length"].to(args.device)
             with torch.no_grad():
                 test_pred = model(input_ids=input_ids, attention_mask=attention_mask,weight_mask=weight_mask, post_token_length=post_token_length)
                 # print(len(outputs))
@@ -398,6 +400,15 @@ def train():
             add_special_tokens=False,  # we handle special tokens elsewhere
             padding_side='left', # since HyenaDNA is causal, we pad on the left
         )
+    elif training_args.model_type == 'rnalm':
+        tokenizer = EsmTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=True,
+            trust_remote_code=True,
+        )
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
@@ -412,9 +423,7 @@ def train():
         tokenizer.eos_token = tokenizer.pad_token
     if 'mer' in training_args.token_type:
         data_args.kmer=int(training_args.token_type[0])
-    # prepd_train_data = '/mnt/data/oss_beijing/multi-omics/RNA/downstream/degradation/train-val-test/train_1.json'
-    # prepd_val_data = '/mnt/data/oss_beijing/multi-omics/RNA/downstream/degradation/train-val-test/val_1.json'
-    # test_data = '/mnt/data/oss_beijing/multi-omics/RNA/downstream/degradation/train-val-test/test_1.json'
+
     train_dataset = SupervisedDataset(os.path.join(data_args.data_path,'train_1.json'), tokenizer, signal_noise_cutoff=0.6, test_set=None, kmer=data_args.kmer, args=training_args)
     val_dataset = SupervisedDataset(os.path.join(data_args.data_path,'val_1.json'), tokenizer, signal_noise_cutoff=1.0, test_set=None, kmer=data_args.kmer, args=training_args)
     public_test_dataset = SupervisedDataset(os.path.join(data_args.data_path,'test_1.json'), tokenizer, signal_noise_cutoff=-99.0, test_set='public', kmer=data_args.kmer, args=training_args)
@@ -426,33 +435,7 @@ def train():
 
     # load model
     # from DNA_BERT2_model.bert_layers import BertForSequenceClassification
-    if training_args.model_type=='mmoe':
-        config = MMoeBertConfig.from_pretrained(model_args.model_name_or_path,
-        num_labels=train_dataset.num_labels)
-        config.stage = training_args.stage
-        print(config)
-        model = MMoeBertForSequenceClassification.from_pretrained(
-        model_args.model_name_or_path,
-        config = config,
-        cache_dir=training_args.cache_dir,
-        #num_labels = train_dataset.num_labels,
-        )
-        if config.stage == '1':
-            for name, param in model.named_parameters():
-                for key in ["rna_expert", "rna_embeddings","rna_pooler", "rna_LayerNorm"]:
-                    if key in name:
-                        param.requires_grad = False  
-                        break        
-        elif config.stage == '2':
-            for param in model.parameters():
-                param.requires_grad = False
-            for name, param in model.named_parameters():
-                for key in ["rna_expert", "rna_embeddings","rna_pooler", "rna_LayerNorm","classifier","attention"]:
-                    if key in name:
-                        #pdb.set_trace()
-                        param.requires_grad = True
-   
-    elif training_args.model_type == 'rnalm':
+    if training_args.model_type == 'rnalm':
         if training_args.train_from_scratch:
             
             print('Train from scratch')
@@ -461,10 +444,12 @@ def train():
                 problem_type="regression",
                 token_type=training_args.token_type,
                 use_flash_att = False,
+                
                 )
             print(config)
             model =  BertForSequenceRNAdegra(
-                config
+                config,
+                tokenizer=tokenizer,
                 )
         else:
             print('Loading rnalm model')
@@ -537,19 +522,6 @@ def train():
                 #token_type=training_args.token_type,
             )
 
-    # configure LoRA
-    if model_args.use_lora:
-        lora_config = LoraConfig(
-            r=model_args.lora_r,
-            lora_alpha=model_args.lora_alpha,
-            target_modules=list(model_args.lora_target_modules.split(",")),
-            lora_dropout=model_args.lora_dropout,
-            bias="none",
-            task_type="SEQ_CLS",
-            inference_mode=False,
-        )
-        model = get_peft_model(model, lora_config)
-        model.print_trainable_parameters()
     trainer = transformers.Trainer(model=model,
                                    tokenizer=tokenizer,
                                    args=training_args,
@@ -578,7 +550,7 @@ def train():
         )
     test_data_loader1 = test_dataset_loader(public_test_dataset,training_args)
     test_data_loader2 = test_dataset_loader(private_test_dataset,training_args)
-    make_pred_file(training_args, model, [test_data_loader1, test_data_loader2],postfix=training_args.output_dir.split('/')[-1])
+    make_pred_file(training_args, model, [test_data_loader1, test_data_loader2],postfix=model_args.model_name_or_path.split('/')[-1])
 if __name__ == "__main__":
     train()
 

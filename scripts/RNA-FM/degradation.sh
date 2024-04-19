@@ -22,7 +22,7 @@ do
             --master_port $master_port \
         downstream/train_degradation.py \
         --model_name_or_path ${MODEL_PATH} \
-        --data_path ${DATA_PATH}/$data \
+        --data_path ${DATA_PATH}/${data} \
         --kmer ${kmer} \
         --run_name ${MODEL_TYPE}${data}_seed${seed} \
         --model_max_length 512 \
@@ -34,7 +34,7 @@ do
         --fp16 \
         --save_steps 200 \
         --output_dir ${OUTPUT_PATH}/${data} \
-        --log_dir ${OUTPUT_PATH}/${MODEL_TYPE}_${data}_seed${seed} \
+        --log_dir ${OUTPUT_PATH}/${MODEL_TYPE}${data}_seed${seed} \
         --seed ${seed} \
         --save_model True \
         --evaluation_strategy steps \
@@ -49,6 +49,6 @@ do
         --model_type ${MODEL_TYPE} \
         --token_type ${token} \
 
-    #kaggle competitions submit -c stanford-covid-vaccine -f ${OUTPUT_PATH}/results/dnabert_seed42/submission_dnabert1.csv -m "Message"
+    kaggle competitions submit -c stanford-covid-vaccine -f ${OUTPUT_PATH}/results/${MODEL_TYPE}${data}_seed${seed}/submission_.csv -m "Message"
 
 done
