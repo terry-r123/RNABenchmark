@@ -273,19 +273,19 @@ def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
     labels = labels.squeeze()
     logits = logits.squeeze()
     #print(logits.shape,labels.shape)
-    try:
-        # log odds to probability
-        # clamp the predictions to avoid log(0)
-        predictions = np.clip(outputs,1e-7,1-1e-7)
-        targets = np.clip(targets,1e-7,1-1e-7)
-        predictions = np.log(predictions/(1-predictions))
-        targets = np.log(targets/(1-targets))
-        r2 = 1 -  np.sum((predictions - targets)**2) / np.sum((targets - np.mean(targets))**2)
-        pearson_r_squared = scipy.stats.pearsonr(predictions,targets)[0]**2
-    except:
-        print("Error in calculating metrics")
-        r2 = 0
-        pearson_r_squared = 0
+    # try:
+    # log odds to probability
+    # clamp the predictions to avoid log(0)
+    predictions = np.clip(logits,1e-7,1-1e-7)
+    targets = np.clip(labels,1e-7,1-1e-7)
+    predictions = np.log(predictions/(1-predictions))
+    targets = np.log(targets/(1-targets))
+    r2 = 1 -  np.sum((predictions - targets)**2) / np.sum((targets - np.mean(targets))**2)
+    pearson_r_squared = scipy.stats.pearsonr(predictions,targets)[0]**2
+    # except:
+    #     print("Error in calculating metrics")
+    #     r2 = 0
+    #     pearson_r_squared = 0
     return {
     "r^2": r2,
     "pearson_r_squared" : pearson_r_squared,
