@@ -29,7 +29,7 @@ sys.path.append(parent_dir)
 from model.rnalm.modeling_rnalm import RNALMForSequenceClassification
 from model.rnalm.rnalm_config import RNALMConfig
 from model.esm.modeling_esm import EsmForSequenceClassification
-# from model.dnabert2_source.bert_layers import BertForSequenceClassification as DNABERT2ForClassification
+from model.dnabert2.bert_layers import BertForSequenceClassification as DNABERT2ForClassification
 # from model.dnabert2_source.bert_layers import BertForSequenceClassificationPromptTokenAvg
 # from model.dnabert2_source.tokenization_6mer import DNATokenizer
 # from model.dnabert1.dnabert_layer import DNABertForSequenceClassification as DNABERT1ForClassification
