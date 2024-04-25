@@ -244,16 +244,13 @@ class DataCollatorForSupervisedDataset(object):
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         input_ids, labels, attention_mask = tuple([instance[key] for instance in instances] for key in ("input_ids" ,"labels", "attention_mask"))
-        input_ids = torch.nn.utils.rnn.pad_sequence(
-            input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
-        )
-
-        padded_attention_mask = torch.nn.utils.rnn.pad_sequence(attention_mask, batch_first=True, padding_value=0)
+        input_ids = torch.stack(input_ids)
+        attention_mask = torch.stack(attention_mask)
         labels = torch.Tensor(labels).float()      
         return dict(
             input_ids=input_ids,
             labels=labels,
-            attention_mask=padded_attention_mask,
+            attention_mask=attention_mask,
         )
 
 """
@@ -340,11 +337,8 @@ def train():
                 )
         else:
             print('Loading rnalm model')
-            #config = MMoeBertConfig.from_pretrained(model_args.model_name_or_path, cache_dir=training_args.cache_dir)
-            #config.use_flash_attn = False
+         
             print(train_dataset.num_labels)
-            #config.num_labels=train_dataset.num_labels
-            #from transformers import BertForSequenceClassification
             model =  BertForRegression.from_pretrained(
                 model_args.model_name_or_path,
                 #config = config,

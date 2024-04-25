@@ -6,14 +6,10 @@ import logging
 import pdb
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Sequence, Tuple, List
-# from model_regression_bert_flash import BertForSequenceClassification as BertForSequenceClassification_flash
-# from model_regression_bert_flash_concat import BertForSequenceClassification as BertForSequenceClassification_flash
-# from model_regression_nt import EsmForSequenceClassification
-#from dnabert2_source.bert_layers import BertForSequenceReg512ConcatStep2 as BertForSequenceClassificationReg
+
 import random
 from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel, EarlyStoppingCallback
-# import os
-# os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+
 
 import torch
 import transformers
@@ -23,15 +19,15 @@ import numpy as np
 import re
 from torch.utils.data import Dataset
 
-# from peft import (
-#     LoraConfig,
-#     get_peft_model,
-#     get_peft_model_state_dict,
-# )
-from model.rnalm.modeling_rnalm import BertForRegression
-from model.rnalm.rnalm_config import RNALMConfig
-from model.esm.modeling_esm import EsmForSequenceClassification
-from model.esm.esm_config import EsmConfig
+
+# from model.rnalm.modeling_rnalm import BertForRegression
+# from model.rnalm.rnalm_config import RNALMConfig
+# from model.esm.modeling_esm import EsmForSequenceClassification
+# from model.esm.esm_config import EsmConfig
+from model.dnabert2_source.bert_layers import BertForSequenceClassification as DNABERT2ForClassification
+from model.dnabert2_source.bert_layers import BertForSequenceClassificationPromptTokenAvg
+from model.dnabert2_source.tokenization_6mer import DNATokenizer
+from model.dnabert1.dnabert_layer import DNABertForSequenceClassification as DNABERT1ForClassification
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
@@ -43,7 +39,7 @@ class ModelArguments:
     lora_alpha: int = field(default=32, metadata={"help": "alpha for LoRA"})
     lora_dropout: float = field(default=0.05, metadata={"help": "dropout rate for LoRA"})
     lora_target_modules: str = field(default="query,value", metadata={"help": "where to perform LoRA"})
-
+    tokenizer_name_or_path: Optional[str] = field(default="zhihan1996/DNABERT-2-117M")
 
 @dataclass
 class DataArguments:
@@ -66,7 +62,7 @@ class TrainingArguments(transformers.TrainingArguments):
     logging_steps: int = field(default=100)
     save_steps: int = field(default=100)
     eval_steps: int = field(default=100)
-    evaluation_strategy: str = field(default="steps"),
+    evaluation_strategy: str = field(default="steps")
     warmup_steps: int = field(default=50)
     weight_decay: float = field(default=0.01)
     learning_rate: float = field(default=1e-4)
@@ -178,7 +174,12 @@ class SupervisedDataset(Dataset):
                  kmer: int = -1):
 
         super(SupervisedDataset, self).__init__()
-
+        if data_args.token_type == 'bpe':
+            prompt_tokenizer = "[BPE]"
+        elif data_args.token_type == '6mer':
+            prompt_tokenizer = "[KMER]"
+        
+        prompt_position = "[ALIBI]"
         # load data from the disk
         with open(data_path, "r") as f:
             data = list(csv.reader(f))[1:]
@@ -203,6 +204,13 @@ class SupervisedDataset(Dataset):
             texts = load_or_generate_kmer(data_path, texts, kmer)
             if torch.distributed.get_rank() == 0:
                 torch.distributed.barrier()
+        if 'prompt' in data_args.model_type:
+            print("Using prompt token, but baseline")
+            prompt_texts = []
+            for text in texts:
+                text = prompt_tokenizer + prompt_position + text
+                prompt_texts.append(text)
+            texts = prompt_texts
         # ensure tokenier
         print(type(texts[0]))
         print(texts[0])
@@ -238,16 +246,13 @@ class DataCollatorForSupervisedDataset(object):
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         input_ids, labels, attention_mask = tuple([instance[key] for instance in instances] for key in ("input_ids" ,"labels", "attention_mask"))
-        input_ids = torch.nn.utils.rnn.pad_sequence(
-            input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
-        )
-
-        padded_attention_mask = torch.nn.utils.rnn.pad_sequence(attention_mask, batch_first=True, padding_value=0)
+        input_ids = torch.stack(input_ids)
+        attention_mask = torch.stack(attention_mask)
         labels = torch.Tensor(labels).float()      
         return dict(
             input_ids=input_ids,
             labels=labels,
-            attention_mask=padded_attention_mask,
+            attention_mask=attention_mask,
         )
 
 """
@@ -270,18 +275,18 @@ def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
         mae = sklearn.metrics.mean_absolute_error(labels[:,i], logits[:,i])
         result_mae.append(mae)
     return {
-    #"R^2": np.mean(result_R2),  
+    #"R^2": np.mean(result_R2),
+    "r^2_mean": np.mean(result),
     #"R^2_ON": result_R2[0],
     #"R^2_OFF": result_R2[1],
     #"R^2_ON_OFF": result_R2[2],
     "r^2_ON": result[0],
     "r^2_OFF": result[1],
     "r^2_ON_OFF": result[2],
-    "r^2_mean": np.mean(result),
+    "MAE_mean": np.mean(result_mae),
     "MAE_ON": result_mae[0],
     "MAE_OFF": result_mae[1],
     "MAE_ON_OFF": result_mae[2],
-    "MAE_mean": np.mean(result_mae),
     }
 
 """
@@ -305,6 +310,12 @@ def train():
             add_special_tokens=False,  # we handle special tokens elsewhere
             padding_side='left', # since HyenaDNA is causal, we pad on the left
         )
+    elif training_args.model_type == 'prompt-6mer':
+        tokenizer = DNATokenizer.from_pretrained(
+            model_args.tokenizer_name_or_path,
+            Model=training_args.model_max_length,
+            cache_dir=training_args.cache_dir,
+        )
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
@@ -320,13 +331,13 @@ def train():
     if 'mer' in training_args.token_type:
         data_args.kmer=int(training_args.token_type[0])
     # define datasets and data collator
-    train_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=data_args,
+    train_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=training_args,
                                       data_path=os.path.join(data_args.data_path, "train.csv"), 
                                       kmer=data_args.kmer)
-    val_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=data_args,
+    val_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=training_args,
                                      data_path=os.path.join(data_args.data_path, "val.csv"), 
                                      kmer=data_args.kmer)
-    test_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=data_args,
+    test_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=training_args,
                                      data_path=os.path.join(data_args.data_path, "test.csv"), 
                                      kmer=data_args.kmer)
     data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
@@ -398,7 +409,47 @@ def train():
                 problem_type="regression",
                 #token_type=training_args.token_type,
             )
+    elif training_args.model_type == 'dnabert1':
 
+        if training_args.train_from_scratch:
+            pass
+        else:
+            print(f'Loading {training_args.model_type} model')  
+            print(train_dataset.num_labels)
+            model = DNABERT1ForClassification.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                num_labels=train_dataset.num_labels,
+                trust_remote_code=True,
+                problem_type="regression",
+                
+            )
+    elif training_args.model_type == 'dnabert2':
+
+        if training_args.train_from_scratch:
+            pass
+        else:
+            print(f'Loading {training_args.model_type} model')    
+            print(train_dataset.num_labels)
+            model = DNABERT2ForClassification.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                num_labels=train_dataset.num_labels,
+                problem_type="regression",
+                trust_remote_code=True,
+                use_alibi=model_args.use_alibi,
+                
+            )
+    elif training_args.model_type == 'prompt-6mer' or training_args.model_type == 'prompt-bpe':
+        print(f'Loading {training_args.model_type} model')  
+        print(train_dataset.num_labels)
+        model = BertForSequenceClassificationPromptTokenAvg.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            use_alibi=model_args.use_alibi,
+            problem_type="regression",
+        )
 
     # configure LoRA
     if model_args.use_lora:
