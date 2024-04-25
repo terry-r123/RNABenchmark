@@ -6,14 +6,8 @@ import logging
 import pdb
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Sequence, Tuple, List
-# from model_regression_bert_flash import BertForSequenceClassification as BertForSequenceClassification_flash
-# from model_regression_bert_flash_concat import BertForSequenceClassification as BertForSequenceClassification_flash
-# from model_regression_nt import EsmForSequenceClassification
-#from dnabert2_source.bert_layers import BertForSequenceRNAdegra as DNABERT2ForRNAdegra
-import random
 
-# import os
-# os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+import random
 
 import torch
 import transformers
@@ -31,12 +25,13 @@ from tqdm import tqdm
 import sys
 sys.path.append("..")
 from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel, EarlyStoppingCallback
-from RNABenchmark.model.rnalm.modeling_rnalm import BertForSequenceRNAdegra 
-from RNABenchmark.model.rnalm.rnalm_config import RNALMConfig
+# from RNABenchmark.model.rnalm.modeling_rnalm import BertForSequenceRNAdegra 
+# from RNABenchmark.model.rnalm.rnalm_config import RNALMConfig
 
 #from hyena_dna.standalone_hyenadna import HyenaForRNADegraPre, CharacterTokenizer
-from model.esm.modeling_esm import ESMForSequenceRNAdegra
-from model.esm.esm_config import EsmConfig
+# from model.esm.modeling_esm import ESMForSequenceRNAdegra
+# from model.esm.esm_config import EsmConfig
+from model.dnabert2_source.bert_layers import BertForSequenceRNAdegra as DNABERT2ForRNAdegra
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
@@ -48,6 +43,7 @@ class ModelArguments:
     lora_alpha: int = field(default=32, metadata={"help": "alpha for LoRA"})
     lora_dropout: float = field(default=0.05, metadata={"help": "dropout rate for LoRA"})
     lora_target_modules: str = field(default="query,value", metadata={"help": "where to perform LoRA"})
+    tokenizer_name_or_path: Optional[str] = field(default="zhihan1996/DNABERT-2-117M")
 
 
 @dataclass
@@ -391,9 +387,8 @@ def train():
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     set_seed(training_args)
     # load tokenizer
-    if training_args.model_type == 'esm-rna':
-        tokenizer = EsmTokenizer.from_pretrained("/mnt/data/ai4bio/renyuchen/DNABERT/examples/rna_finetune/ssp/vocab_esm_mars.txt")
-    elif training_args.model_type == 'hyena':
+    
+    if training_args.model_type == 'hyena':
         tokenizer = CharacterTokenizer(
             characters=['A', 'C', 'G', 'T', 'N'],  # add DNA characters, N is uncertain
             model_max_length=training_args.model_max_length + 2,  # to account for special tokens, like EOS
@@ -434,7 +429,6 @@ def train():
     print(f'# train: {len(train_dataset)},val:{len(val_dataset)},test:{len(private_test_dataset)}+{len(private_test_dataset)}')
 
     # load model
-    # from DNA_BERT2_model.bert_layers import BertForSequenceClassification
     if training_args.model_type == 'rnalm':
         if training_args.train_from_scratch:
             
@@ -452,12 +446,8 @@ def train():
                 tokenizer=tokenizer,
                 )
         else:
-            print('Loading rnalm model')
-            #config = MMoeBertConfig.from_pretrained(model_args.model_name_or_path, cache_dir=training_args.cache_dir)
-            #config.use_flash_attn = False
+            print('Loading rnalm model')  
             print(train_dataset.num_labels)
-            #config.num_labels=train_dataset.num_labels
-            #from transformers import BertForSequenceClassification
             model =  BertForSequenceRNAdegra.from_pretrained(
                 model_args.model_name_or_path,
                 #config = config,
@@ -503,6 +493,7 @@ def train():
                 use_alibi=model_args.use_alibi,
                 problem_type="regression",
                 token_type=training_args.token_type,
+                tokenizer=tokenizer,
             )
     elif training_args.model_type == 'hyena':
         backbone_cfg = None
@@ -550,7 +541,7 @@ def train():
         )
     test_data_loader1 = test_dataset_loader(public_test_dataset,training_args)
     test_data_loader2 = test_dataset_loader(private_test_dataset,training_args)
-    make_pred_file(training_args, model, [test_data_loader1, test_data_loader2],postfix=model_args.model_name_or_path.split('/')[-1])
+    make_pred_file(training_args, model, [test_data_loader1, test_data_loader2],postfix=training_args.output_dir.split('/')[-1])
 if __name__ == "__main__":
     train()
 
