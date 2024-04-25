@@ -26,11 +26,9 @@ parent_dir = os.path.dirname(current_path)
 
 # 添加父目录到sys.path
 sys.path.append(parent_dir)
-#from model.rnalm.modeling_rnalm import RnalmForCRISPROffTarget
+from model.rnalm.modeling_rnalm import RNALMForSequenceClassification
 from model.rnalm.rnalm_config import RNALMConfig
 from model.esm.modeling_esm import EsmForSequenceClassification
-# from model.rnalm.modeling_rnalm import BertForRegression
-# from model.rnalm.rnalm_config import RNALMConfig
 # from model.dnabert2_source.bert_layers import BertForSequenceClassification as DNABERT2ForClassification
 # from model.dnabert2_source.bert_layers import BertForSequenceClassificationPromptTokenAvg
 # from model.dnabert2_source.tokenization_6mer import DNATokenizer
@@ -312,6 +310,15 @@ def train():
             add_special_tokens=False,  # we handle special tokens elsewhere
             padding_side='left', # since HyenaDNA is causal, we pad on the left
         )
+    elif training_args.model_type == 'rnalm':
+        tokenizer = EsmTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=True,
+            trust_remote_code=True,
+        )
     elif training_args.model_type == 'prompt-6mer':
         tokenizer = DNATokenizer.from_pretrained(
             model_args.tokenizer_name_or_path,
@@ -354,7 +361,7 @@ def train():
     # load model
     if training_args.model_type == 'rnalm':
         if training_args.train_from_scratch:
-            print('Train from scratch')
+            print('Train rnalm from scratch')
             config = RNALMConfig.from_pretrained(model_args.model_name_or_path,
                 num_labels=train_dataset.num_labels,
                 problem_type="regression",
@@ -362,13 +369,13 @@ def train():
                 use_flash_att = False,
                 )
             print(config)
-            model =  BertForRegression(
+            model =  RNALMForSequenceClassification(
                 config
                 )
         else:
             print('Loading rnalm model')
             print(train_dataset.num_labels)
-            model =  BertForRegression.from_pretrained(
+            model =  RNALMForSequenceClassification.from_pretrained(
                 model_args.model_name_or_path,
                 #config = config,
                 cache_dir=training_args.cache_dir,
