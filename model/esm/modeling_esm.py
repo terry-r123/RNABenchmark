@@ -1304,22 +1304,29 @@ class MCRMSELoss(nn.Module):
             score += self.rmse(yhat[:, :, i], y[:, :, i]) / self.num_scored
         return score
 
-class ESMForSequenceRNAdegra(EsmPreTrainedModel):
-    def __init__(self, config):
+class ESMForNucleotideLevel(EsmPreTrainedModel):
+    def __init__(self, config, tokenizer=None):
         super().__init__(config)
         self.num_labels = config.num_labels
         self.config = config
     
         self.esm = EsmModel(config, add_pooling_layer=False)
-        classifier_dropout = (
-            config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob
-        )
-        self.dropout = nn.Dropout(classifier_dropout)
-        # if self.use_features:
-        #     self.classifier = nn.Linear(config.hidden_size +8 , config.num_labels)
-        # else:
-        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
-        #self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+        self.tokenizer = tokenizer
+        if self.config.token_type == 'bpe' or  self.config.token_type=='non-overlap':
+            self.classifier_a = nn.Linear(config.hidden_size, config.num_labels)
+            self.classifier_t = nn.Linear(config.hidden_size, config.num_labels)
+            self.classifier_c = nn.Linear(config.hidden_size, config.num_labels)
+            self.classifier_g = nn.Linear(config.hidden_size, config.num_labels)
+            self.classifier_n = nn.Linear(config.hidden_size, config.num_labels)
+            self.classifer_dict = {
+                'A': self.classifier_a,
+                'T': self.classifier_t,
+                'C': self.classifier_c,
+                'G': self.classifier_g,
+                'N': self.classifier_n,
+                }
+        else:
+            self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
         # Initialize weights and apply final processing
         self.init_weights()
@@ -1347,13 +1354,6 @@ class ESMForSequenceRNAdegra(EsmPreTrainedModel):
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        total_mask_dim = attention_mask.shape[1]
-        #print(total_mask_dim)
-        cur_length = int(total_mask_dim/3)
-        #print(cur_length)
-        
-        #attention_mask, weight_mask, post_token_length = torch.split(attention_mask, (cur_length,cur_length,cur_length), dim=1)
-        #print('---------------------',attention_mask.shape,weight_mask.shape,post_token_length.shape)
         outputs = self.esm(
             input_ids,
             attention_mask=attention_mask,
@@ -1364,46 +1364,50 @@ class ESMForSequenceRNAdegra(EsmPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        #print(outputs[0].shape)
         final_input= outputs[0]
 
-        final_input= self.dropout(final_input)
         ### init mappint tensor
         ori_length = weight_mask.shape[1]
         batch_size = final_input.shape[0]
-        #cur_length = final_input.shape[1]
-        #assert cur_length == final_input.shape[1]
-        
+        cur_length = int(final_input.shape[1])
+
         if self.config.token_type == 'single':
-            #assert ori_length==cur_length
             assert attention_mask.shape==weight_mask.shape==post_token_length.shape
             mapping_final_input = final_input
-        elif self.config.token_type == 'bpe':
+        elif self.config.token_type == 'bpe' or  self.config.token_type=='non-overlap':
+            logits = torch.zeros((batch_size, ori_length, self.num_labels), dtype=final_input.dtype, device=final_input.device)
+            nucleotide_indices = {nucleotide: (input_ids == self.tokenizer.encode(nucleotide, add_special_tokens=False)[0]).nonzero() for nucleotide in 'ATCGN'}
+            #original_texts = [self.tokenizer.decode(ids,skip_special_tokens=True) for ids in input_ids]
             padding_tensor = torch.zeros((batch_size, ori_length-cur_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
-            mapping_final_input =torch.cat([padding_tensor, final_input], dim=1)
-            mapping_final_input[:,0,:] = final_input[:,0,:] #[cls] token
+            #print(padding_tensor.shape,final_input.shape)
+            mapping_final_input = torch.cat([padding_tensor, final_input], dim=1)
+            #mapping_final_input[:,0,:] = final_input[:,0,:] #[cls] token
             for bz in range(batch_size):
                 start_index = 0
-                for i, length in enumerate(post_token_length[bz]):
-                    mapping_final_input[bz,start_index:start_index + length, :] = final_input[bz,i,:]
-                    start_index += length
+                for i, length in enumerate(post_token_length[bz]): #astart from [cls]
+                    mapping_final_input[bz,start_index:start_index + int(length.item()), :] = final_input[bz,i,:]
+                    start_index += int(length.item())
+            for nucleotide, indices in nucleotide_indices.items(): # indices:[bzid,seqid]
+                #print(nucleotide, indices) 
+                if indices.numel() > 0:  
+                    bz_indices, pos_indices = indices.split(1, dim=1)
+                    bz_indices = bz_indices.squeeze(-1) 
+                    pos_indices = pos_indices.squeeze(-1)
+                    nucleotide_logits = self.classifer_dict[nucleotide](mapping_final_input[bz_indices, pos_indices])
+                    nucleotide_logits = nucleotide_logits.to(logits.dtype)
+                    logits.index_put_((bz_indices, pos_indices), nucleotide_logits)
         elif self.config.token_type == '6mer':
             padding_tensor = torch.zeros((batch_size, ori_length-cur_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
-            mapping_final_input =torch.cat([padding_tensor, final_input], dim=1)
+            mapping_final_input = torch.cat([padding_tensor, final_input], dim=1)
             mapping_final_input[:,0,:] = final_input[:,0,:] #[cls] token
             for bz in range(batch_size):
                 value_length = torch.sum(attention_mask[bz,:]==1).item()
-                #print(value_length)
-                #assert 
                 for i in range(1,value_length-1): #exclude cls,sep token
-                    #print(i)
-                    #print(mapping_final_input.shape,final_input.shape)
                     mapping_final_input[bz,i:i+6,:] += final_input[bz,i]
                 mapping_final_input[bz,value_length+5-1,:] = final_input[bz,value_length-1,:] #[sep] token
-
         mapping_final_input = mapping_final_input * weight_mask.unsqueeze(2)
-        #print(mapping_final_input)
-        logits = self.classifier(mapping_final_input)
+        if self.config.token_type == '6mer' or self.config.token_type =='single': 
+            logits = self.classifier(mapping_final_input)
         loss = None
         if labels is not None:
             if self.config.problem_type is None:
@@ -1416,30 +1420,26 @@ class ESMForSequenceRNAdegra(EsmPreTrainedModel):
 
             if self.config.problem_type == "regression":
                 loss_fct = MCRMSELoss()
-                #loss_fct = nn.MSELoss()
-                #print('model',logits.shape,labels.shape)
                 logits = logits[:, 1:1+labels.size(1), :]
-                #loss_fct = nn.MSELoss()
                 if self.num_labels == 1:
                     loss = loss_fct(logits.squeeze(), labels.squeeze())
-                    # print(loss)
                 else:
                     loss = loss_fct(logits, labels)
             elif self.config.problem_type == "single_label_classification":
                 loss_fct = CrossEntropyLoss()
-                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                logits = logits[:, 1:1+labels.size(1), :]
+                loss = loss_fct(logits.reshape(-1, self.num_labels), labels.reshape(-1).long())
             elif self.config.problem_type == "multi_label_classification":
                 loss_fct = BCEWithLogitsLoss()
                 loss = loss_fct(logits, labels)
         if not return_dict:
-            
             output = (logits,) + outputs[2:]
-            return ((loss,) + output) if loss is not None else output       
+            return ((loss,) + output) if loss is not None else output
         return SequenceClassifierOutput(
             loss=loss,
             logits=logits,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
+            hidden_states=None,
+            attentions=None,
         )
 
 class ESMForStructuralimputation(EsmPreTrainedModel):

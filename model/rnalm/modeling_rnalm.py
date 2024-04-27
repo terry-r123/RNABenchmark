@@ -1529,7 +1529,7 @@ class RNALMForSequenceClassification(BertPreTrainedModel):
         #     attentions=outputs.attentions,
         # )
 
-class BertForSequenceRNAdegra(BertPreTrainedModel):
+class RNALMForNucleotideLevel(BertPreTrainedModel):
     def __init__(self, config, tokenizer=None):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -1657,22 +1657,19 @@ class BertForSequenceRNAdegra(BertPreTrainedModel):
 
             if self.config.problem_type == "regression":
                 loss_fct = MCRMSELoss()
-                #loss_fct = nn.MSELoss()
-                #print('model',logits.shape,labels.shape)
                 logits = logits[:, 1:1+labels.size(1), :]
-                #loss_fct = nn.MSELoss()
                 if self.num_labels == 1:
                     loss = loss_fct(logits.squeeze(), labels.squeeze())
                 else:
                     loss = loss_fct(logits, labels)
             elif self.config.problem_type == "single_label_classification":
                 loss_fct = CrossEntropyLoss()
-                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                logits = logits[:, 1:1+labels.size(1), :]
+                loss = loss_fct(logits.reshape(-1, self.num_labels), labels.reshape(-1).long())
             elif self.config.problem_type == "multi_label_classification":
                 loss_fct = BCEWithLogitsLoss()
                 loss = loss_fct(logits, labels)
         if not return_dict:
-    
             output = (logits,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
         return SequenceClassifierOutput(
