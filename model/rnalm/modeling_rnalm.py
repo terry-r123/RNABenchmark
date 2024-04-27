@@ -1530,6 +1530,7 @@ class RNALMForSequenceClassification(BertPreTrainedModel):
         # )
 
 class RNALMForNucleotideLevel(BertPreTrainedModel):
+    # include Degradation and SpliceAI
     def __init__(self, config, tokenizer=None):
         super().__init__(config)
         self.num_labels = config.num_labels

@@ -23,15 +23,18 @@ from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
 import sys
-sys.path.append("..")
+
+current_path = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_path)
+sys.path.append(parent_dir)
 from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel, EarlyStoppingCallback
-# from RNABenchmark.model.rnalm.modeling_rnalm import BertForSequenceRNAdegra 
-# from RNABenchmark.model.rnalm.rnalm_config import RNALMConfig
+from model.rnalm.modeling_rnalm import RNALMForNucleotideLevel
+from model.rnalm.rnalm_config import RNALMConfig
 
 #from hyena_dna.standalone_hyenadna import HyenaForRNADegraPre, CharacterTokenizer
 # from model.esm.modeling_esm import ESMForSequenceRNAdegra
 # from model.esm.esm_config import EsmConfig
-from model.dnabert2_source.bert_layers import BertForSequenceRNAdegra as DNABERT2ForRNAdegra
+#from model.dnabert2_source.bert_layers import BertForSequenceRNAdegra as DNABERT2ForRNAdegra
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
@@ -441,14 +444,14 @@ def train():
                 
                 )
             print(config)
-            model =  BertForSequenceRNAdegra(
+            model =  RNALMForNucleotideLevel(
                 config,
                 tokenizer=tokenizer,
                 )
         else:
             print('Loading rnalm model')  
             print(train_dataset.num_labels)
-            model =  BertForSequenceRNAdegra.from_pretrained(
+            model =  RNALMForNucleotideLevel.from_pretrained(
                 model_args.model_name_or_path,
                 #config = config,
                 cache_dir=training_args.cache_dir,

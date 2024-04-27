@@ -21,13 +21,9 @@ import re
 from torch.utils.data import Dataset
 
 import sys
-# 获取当前文件的路径
+
 current_path = os.path.dirname(os.path.abspath(__file__))
-
-# 获取父目录的路径
 parent_dir = os.path.dirname(current_path)
-
-# 添加父目录到sys.path
 sys.path.append(parent_dir)
 
 
