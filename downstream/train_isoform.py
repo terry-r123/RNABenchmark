@@ -18,21 +18,21 @@ import numpy as np
 import re
 from torch.utils.data import Dataset
 import sys
-# 获取当前文件的路径
+
 current_path = os.path.dirname(os.path.abspath(__file__))
-
-# 获取父目录的路径
 parent_dir = os.path.dirname(current_path)
-
-# 添加父目录到sys.path
 sys.path.append(parent_dir)
 from model.rnalm.modeling_rnalm import RNALMForSequenceClassification
 from model.rnalm.rnalm_config import RNALMConfig
 from model.esm.modeling_esm import EsmForSequenceClassification
+from model.esm.esm_config import EsmConfig
 from model.dnabert2.bert_layers import BertForSequenceClassification as DNABERT2ForClassification
-# from model.dnabert2_source.bert_layers import BertForSequenceClassificationPromptTokenAvg
-# from model.dnabert2_source.tokenization_6mer import DNATokenizer
-# from model.dnabert1.dnabert_layer import DNABertForSequenceClassification as DNABERT1ForClassification
+from model.prompt_dnabert2.bert_layers import BertForSequenceClassificationPromptTokenAvg
+from model.prompt_dnabert2.tokenization_6mer import DNATokenizer
+from model.dnabert1.dnabert_layer import DNABertForSequenceClassification as DNABERT1ForClassification
+from model.ntv2.modeling_esm import EsmForSequenceClassification as NTv2ForSequenceClassification
+from model.hyenadna.tokenization_hyena import HyenaDNATokenizer
+from model.hyenadna.modeling_hyena import HyenaDNAForSequenceClassification
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
@@ -51,7 +51,9 @@ class ModelArguments:
 class DataArguments:
     data_path: str = field(default=None, metadata={"help": "Path to the training data."})
     kmer: int = field(default=-1, metadata={"help": "k-mer for input sequence. -1 means not using k-mer."})
-    
+    data_train_path: str = field(default=None, metadata={"help": "Path to the training data."})
+    data_val_path: str = field(default=None, metadata={"help": "Path to the training data."})
+    data_test_path: str = field(default=None, metadata={"help": "Path to the test data. is list"})
 
 
 @dataclass
@@ -175,14 +177,14 @@ class SupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
     def __init__(self, 
-                 data_path: str, data_args,
+                 data_path: str, args,
                  tokenizer: transformers.PreTrainedTokenizer, 
                  kmer: int = -1):
 
         super(SupervisedDataset, self).__init__()
-        if data_args.token_type == 'bpe':
+        if args.token_type == 'bpe':
             prompt_tokenizer = "[BPE]"
-        elif data_args.token_type == '6mer':
+        elif args.token_type == '6mer':
             prompt_tokenizer = "[KMER]"
         
         prompt_position = "[ALIBI]"
@@ -211,7 +213,7 @@ class SupervisedDataset(Dataset):
             texts = load_or_generate_kmer(data_path, texts, kmer)
             if torch.distributed.get_rank() == 0:
                 torch.distributed.barrier()
-        if 'prompt' in data_args.model_type:
+        if 'prompt' in args.model_type:
             print("Using prompt token, but baseline")
             prompt_texts = []
             for text in texts:
@@ -234,7 +236,11 @@ class SupervisedDataset(Dataset):
         )
 
         self.input_ids = output["input_ids"]
-        self.attention_mask = output["attention_mask"]
+        if args.model_type == 'hyenadna':
+            self.attention_mask = torch.ones_like(self.input_ids)
+            print(self.attention_mask.shape)
+        else:
+            self.attention_mask = output["attention_mask"]
 
         self.labels = labels
         self.num_labels = 1
@@ -249,13 +255,24 @@ class SupervisedDataset(Dataset):
 class DataCollatorForSupervisedDataset(object):
     """Collate examples for supervised fine-tuning."""
 
-    tokenizer: transformers.PreTrainedTokenizer
+    def __init__(self, tokenizer: transformers.PreTrainedTokenizer, args):
+        self.tokenizer = tokenizer
+        self.args = args
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        input_ids, labels, attention_mask = tuple([instance[key] for instance in instances] for key in ("input_ids" ,"labels", "attention_mask"))
+        if self.args.model_type=="hyenadna":
+            input_ids, labels = tuple([instance[key] for instance in instances] for key in ("input_ids" ,"labels"))
+        else:
+
+            input_ids, labels, attention_mask = tuple([instance[key] for instance in instances] for key in ("input_ids" ,"labels", "attention_mask"))
+            attention_mask = torch.stack(attention_mask)
         input_ids = torch.stack(input_ids)
-        attention_mask = torch.stack(attention_mask)
-        labels = torch.Tensor(labels).float()      
+        labels = torch.Tensor(labels).float()  
+        if self.args.model_type=="hyenadna":
+            return dict(
+                input_ids=input_ids,
+                labels=labels,
+            )
         return dict(
             input_ids=input_ids,
             labels=labels,
@@ -303,15 +320,17 @@ def train():
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     set_seed(training_args)
     # load tokenizer
-    if training_args.model_type == 'hyena':
-        tokenizer = CharacterTokenizer(
-            characters=['A', 'C', 'G', 'T', 'N'],  # add DNA characters, N is uncertain
-            model_max_length=training_args.model_max_length + 2,  # to account for special tokens, like EOS
-            add_special_tokens=False,  # we handle special tokens elsewhere
-            padding_side='left', # since HyenaDNA is causal, we pad on the left
-        )
-    elif training_args.model_type == 'rnalm':
+    if training_args.model_type == 'rnalm':
         tokenizer = EsmTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=True,
+            trust_remote_code=True,
+        )
+    if training_args.model_type == 'hyenadna':
+        tokenizer = HyenaDNATokenizer.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
             model_max_length=training_args.model_max_length,
@@ -340,28 +359,29 @@ def train():
     if 'mer' in training_args.token_type:
         data_args.kmer=int(training_args.token_type[0])
     # define datasets and data collator
-    train_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=training_args,
-                                      data_path=os.path.join(data_args.data_path, "train_new.csv"), 
+    train_dataset = SupervisedDataset(tokenizer=tokenizer, args=training_args,
+                                     data_path=os.path.join(data_args.data_path, data_args.data_train_path), 
                                       kmer=data_args.kmer)
-    val_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=training_args,
-                                     data_path=os.path.join(data_args.data_path, "val.csv"), 
+    val_dataset = SupervisedDataset(tokenizer=tokenizer, args=training_args,
+                                     data_path=os.path.join(data_args.data_path, data_args.data_val_path), 
                                      kmer=data_args.kmer)
-    test_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=training_args,
-                                     data_path=os.path.join(data_args.data_path, "test.csv"), 
-                                     kmer=data_args.kmer)
+    # test_dataset = SupervisedDataset(tokenizer=tokenizer, args=training_args,
+    #                                  data_path=os.path.join(data_args.data_path, data_args.data_test_path), 
+    #                                  kmer=data_args.kmer)
+    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer,args=training_args)
     # holdout_HSPE1 = SupervisedDataset(tokenizer=tokenizer,
     #                                 data_path=os.path.join(data_path, "holdout_HSPE1.csv"))
     # holdout_SNHG6 = SupervisedDataset(tokenizer=tokenizer,
     #                                 data_path=os.path.join(data_path, "holdout_SNHG6.csv"))
     # holdout_WHAMMP2 = SupervisedDataset(tokenizer=tokenizer,
     #                                 data_path=os.path.join(data_path, "holdout_WHAMMP2.csv"))
-    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
-    print(f'# train: {len(train_dataset)},val:{len(val_dataset)},test:{len(test_dataset)}')
+    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer,args=training_args)
+    print(f'# train: {len(train_dataset)},val:{len(val_dataset)}')#,test:{len(test_dataset)}')
 
     # load model
     if training_args.model_type == 'rnalm':
         if training_args.train_from_scratch:
-            print('Train rnalm from scratch')
+            print('Train from scratch')
             config = RNALMConfig.from_pretrained(model_args.model_name_or_path,
                 num_labels=train_dataset.num_labels,
                 problem_type="regression",
@@ -370,7 +390,8 @@ def train():
                 )
             print(config)
             model =  RNALMForSequenceClassification(
-                config
+                config,
+                problem_type="regression",
                 )
         else:
             print('Loading rnalm model')
@@ -386,7 +407,13 @@ def train():
                 )
     elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm':
         if training_args.train_from_scratch:
-            pass
+            print('Loading esm model')
+            print('Train from scratch')
+            config = AutoConfig.from_pretrained(model_args.model_name_or_path,
+                num_labels=train_dataset.num_labels)
+            model = transformers.AutoModelForSequenceClassification.from_config(
+                config
+                )
         else:
             print(training_args.model_type)
             print(f'Loading {training_args.model_type} model')
@@ -396,23 +423,16 @@ def train():
                 num_labels=train_dataset.num_labels,
                 problem_type="regression",
                 trust_remote_code=True,
-            )    
-    elif training_args.model_type == 'hyena':
-        backbone_cfg = None
+            )        
+    elif training_args.model_type == 'hyenadna':
         if training_args.train_from_scratch:
             pass
         else:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            print("Using device:", device)
-            model = HyenaForRNADegraPre.from_pretrained(
+            model = HyenaDNAForSequenceClassification.from_pretrained(
                 model_args.model_name_or_path,
-                #download=True,
-                config=backbone_cfg,
-                device=device,
-                use_head=False,
-                n_classes=train_dataset.num_labels,
+                cache_dir=training_args.cache_dir,
+                num_labels=train_dataset.num_labels,
                 problem_type="regression",
-                #token_type=training_args.token_type,
             )
     elif training_args.model_type == 'dnabert1':
 
@@ -434,16 +454,26 @@ def train():
         if training_args.train_from_scratch:
             pass
         else:
-            print(f'Loading {training_args.model_type} model')  
+            print(f'Loading {training_args.model_type} model')    
             print(train_dataset.num_labels)
             model = DNABERT2ForClassification.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
                 num_labels=train_dataset.num_labels,
-                trust_remote_code=True,
-                use_alibi=model_args.use_alibi,
                 problem_type="regression",
-                
+                trust_remote_code=True,
+                use_alibi=model_args.use_alibi,            
+            )
+    elif training_args.model_type == "ntv2":
+        if training_args.train_from_scratch:
+            pass
+        else:
+            print(f'Loading {training_args.model_type} model')
+            model = NTv2ForSequenceClassification.from_pretrained(
+                model_args.model_name_or_path,
+                cache_dir=training_args.cache_dir,
+                num_labels=train_dataset.num_labels,
+                problem_type="regression",
             )
     elif training_args.model_type == 'prompt-6mer' or training_args.model_type == 'prompt-bpe':
         print(f'Loading {training_args.model_type} model')  
@@ -472,15 +502,32 @@ def train():
     if training_args.save_model:
         trainer.save_state()
         #safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
-
+    data_test_list = data_args.data_test_path.replace(" ", "").split(",")
+    print(f"data_test_list = {len(data_test_list)}")
     # get the evaluation results from trainer
     if training_args.eval_and_save_results:
-        results_path = os.path.join(training_args.output_dir, "results", training_args.run_name)
+        for data_test in data_test_list:
+            data_test_name = data_test +".csv"
+            print(f"evaluating data_test_name = {data_test_name}")
+            test_dataset = SupervisedDataset(tokenizer=tokenizer, args=training_args,
+                                            data_path=os.path.join(data_args.data_path, data_test_name), 
+                                            kmer=data_args.kmer)
+            results_path = os.path.join(training_args.output_dir, "results", training_args.run_name)
+            results = trainer.evaluate(eval_dataset=test_dataset)
+            os.makedirs(results_path, exist_ok=True)
+            results_test = trainer.evaluate(eval_dataset=test_dataset)
+            with open(os.path.join(results_path, f"{data_test}_results.json"), "w") as f:
+                for key, value in results_test.items():
+                    result_line = json.dumps({key: value})
+                    f.write(result_line + "\n")
+        # results_path = os.path.join(training_args.output_dir, "results", training_args.run_name)
         
-        os.makedirs(results_path, exist_ok=True)
-        results_test = trainer.evaluate(eval_dataset=test_dataset)
-        with open(os.path.join(results_path, "test_results.json"), "w") as f:
-            json.dump(results_test, f)
+        # os.makedirs(results_path, exist_ok=True)
+        # results_test = trainer.evaluate(eval_dataset=test_dataset)
+        # with open(os.path.join(results_path, "test_results.json"), "w") as f:
+        #     for key, value in results_test.items():
+        #         result_line = json.dumps({key: value})
+        #         f.write(result_line + "\n")
 
 
 if __name__ == "__main__":

@@ -435,9 +435,7 @@ def train():
         results_test = trainer.evaluate(eval_dataset=test_dataset)
         with open(os.path.join(results_path, "test_results.json"), "w") as f:
             for key, value in results_test.items():
-                # 将每个键值对格式化为字符串
                 result_line = json.dumps({key: value})
-                # 写入文件，并在每个键值对后添加换行符
                 f.write(result_line + "\n")
         # with open(os.path.join(results_path, "test_results.json"), "w") as f:
         #     json.dump(results_test, f)
