@@ -6,14 +6,9 @@ import logging
 import pdb
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Sequence, Tuple, List
-# from model_regression_bert_flash import BertForSequenceClassification as BertForSequenceClassification_flash
-# from model_regression_bert_flash_concat import BertForSequenceClassification as BertForSequenceClassification_flash
-# from model_regression_nt import EsmForSequenceClassification
-#from dnabert2_source.bert_layers import BertForSequenceReg512ConcatStep2 as BertForSequenceClassificationReg
+
 import random
 from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel, EarlyStoppingCallback
-# import os
-# os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 import torch
 import transformers
@@ -23,12 +18,12 @@ import numpy as np
 import re
 from torch.utils.data import Dataset
 
-# from peft import (
-#     LoraConfig,
-#     get_peft_model,
-#     get_peft_model_state_dict,
-# )
-from model.rnalm.modeling_rnalm import BertForRegression
+import sys
+
+current_path = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_path)
+sys.path.append(parent_dir)
+from model.rnalm.modeling_rnalm import RNALMForStructuralimputation
 from model.rnalm.rnalm_config import RNALMConfig
 from model.esm.modeling_esm import ESMForStructuralimputation
 from model.esm.esm_config import EsmConfig
@@ -43,13 +38,16 @@ class ModelArguments:
     lora_alpha: int = field(default=32, metadata={"help": "alpha for LoRA"})
     lora_dropout: float = field(default=0.05, metadata={"help": "dropout rate for LoRA"})
     lora_target_modules: str = field(default="query,value", metadata={"help": "where to perform LoRA"})
+    tokenizer_name_or_path: Optional[str] = field(default="zhihan1996/DNABERT-2-117M")
 
 
 @dataclass
 class DataArguments:
     data_path: str = field(default=None, metadata={"help": "Path to the training data."})
     kmer: int = field(default=-1, metadata={"help": "k-mer for input sequence. -1 means not using k-mer."})
-    
+    data_train_path: str = field(default=None, metadata={"help": "Path to the training data."})
+    data_val_path: str = field(default=None, metadata={"help": "Path to the training data."})
+    data_test_path: str = field(default=None, metadata={"help": "Path to the test data. is list"})
 
 
 @dataclass
@@ -169,11 +167,26 @@ def load_or_generate_kmer(data_path: str, texts: List[str], k: int) -> List[str]
         
     return kmer
 
+def bpe_position(texts,attn_mask, tokenizer):
+    position_id = torch.zeros(attn_mask.shape)
+    for i,text in enumerate(texts):   
+        text = tokenizer.tokenize(text)
+        position_id[:, 0] = 1 #[cls]
+        index = 0
+        for j, token in enumerate(text):
+            index = j+1
+            position_id[i,index] = len(token) #start after [cls]   
+        position_id[i, index+1] = 1 #[sep]
+        
+    print(position_id[0,:])
+    print('position_id.shape',position_id.shape)
+    return position_id
+    
 class SupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
     def __init__(self, 
-                 data_path: str, data_args,
+                 data_path: str, args,
                  tokenizer: transformers.PreTrainedTokenizer, 
                  kmer: int = -1):
 
@@ -222,12 +235,18 @@ class SupervisedDataset(Dataset):
 
         self.input_ids = output["input_ids"]
         self.attention_mask = output["attention_mask"]
+        self.weight_mask = torch.ones((self.input_ids.shape[0],seq_length+2))
+        if args.token_type == '6mer':
+            for i in range(1,5):
+                self.weight_mask[:,i+1]=self.weight_mask[:,-i-2]=1/(i+1) 
+            self.weight_mask[:, 6:-6] = 1/6
+        self.post_token_length = torch.zeros(self.attention_mask.shape)
+        if args.token_type == 'bpe' or args.token_type == 'non-overlap':
+            self.post_token_length = bpe_position(self.texts,self.attention_mask,tokenizer)
 
         self.labels = labels
         self.struct = struct
         self.num_labels = 1
-        self.weight_mask = torch.ones((self.input_ids.shape[0],seq_length+2))
-        self.post_token_length = torch.zeros(self.attention_mask.shape)
 
     def __len__(self):
         return len(self.input_ids)
@@ -240,7 +259,9 @@ class SupervisedDataset(Dataset):
 class DataCollatorForSupervisedDataset(object):
     """Collate examples for supervised fine-tuning."""
 
-    tokenizer: transformers.PreTrainedTokenizer
+    def __init__(self, tokenizer: transformers.PreTrainedTokenizer, args):
+        self.tokenizer = tokenizer
+        self.args = args
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         input_ids, labels, attention_mask, struct, weight_mask, post_token_length = tuple([instance[key] for instance in instances] for key in ("input_ids" ,"labels", "attention_mask", "struct","weight_mask","post_token_length"))
@@ -289,12 +310,14 @@ def train():
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     set_seed(training_args)
     # load tokenizer
-    if training_args.model_type == 'hyena':
-        tokenizer = CharacterTokenizer(
-            characters=['A', 'C', 'G', 'T', 'N'],  # add DNA characters, N is uncertain
-            model_max_length=training_args.model_max_length + 2,  # to account for special tokens, like EOS
-            add_special_tokens=False,  # we handle special tokens elsewhere
-            padding_side='left', # since HyenaDNA is causal, we pad on the left
+    if training_args.model_type == 'rnalm':
+        tokenizer = EsmTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=True,
+            trust_remote_code=True,
         )
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -311,20 +334,19 @@ def train():
     if 'mer' in training_args.token_type:
         data_args.kmer=int(training_args.token_type[0])
     # define datasets and data collator
-    train_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=data_args,
-                                      data_path=os.path.join(data_args.data_path, "train.csv"), 
+    train_dataset = SupervisedDataset(tokenizer=tokenizer, args=training_args,
+                                     data_path=os.path.join(data_args.data_path, data_args.data_train_path), 
                                       kmer=data_args.kmer)
-    val_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=data_args,
-                                     data_path=os.path.join(data_args.data_path, "val.csv"), 
+    val_dataset = SupervisedDataset(tokenizer=tokenizer, args=training_args,
+                                     data_path=os.path.join(data_args.data_path, data_args.data_val_path), 
                                      kmer=data_args.kmer)
-    test_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=data_args,
-                                     data_path=os.path.join(data_args.data_path, "test.csv"), 
+    test_dataset = SupervisedDataset(tokenizer=tokenizer, args=training_args,
+                                     data_path=os.path.join(data_args.data_path, data_args.data_test_path), 
                                      kmer=data_args.kmer)
-    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
+    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer,args=training_args)
     print(f'# train: {len(train_dataset)},val:{len(val_dataset)},test:{len(test_dataset)}')
 
     # load model
-    # from DNA_BERT2_model.bert_layers import BertForSequenceClassification
     if training_args.model_type == 'rnalm':
         if training_args.train_from_scratch:
             #print('Loading 6mer model')
@@ -336,15 +358,14 @@ def train():
                 use_flash_att = False,
                 )
             print(config)
-            model =  BertForRegression(
-                config
+            model =  RNALMForStructuralimputation(
+                config,
+                tokenizer=tokenizer,
                 )
         else:
-            print('Loading rnalm model')
+            print(f'Loading {training_args.model_type} model')
             print(train_dataset.num_labels)
-            #config.num_labels=train_dataset.num_labels
-            #from transformers import BertForSequenceClassification
-            model =  BertForRegression.from_pretrained(
+            model =  RNALMForStructuralimputation.from_pretrained(
                 model_args.model_name_or_path,
                 #config = config,
                 cache_dir=training_args.cache_dir,
@@ -352,10 +373,11 @@ def train():
                 #trust_remote_code=True,
                 problem_type="regression",
                 token_type=training_args.token_type,
+                tokenizer=tokenizer,
                 )
     elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm':
         if training_args.train_from_scratch:
-            print('Loading esm model')
+            print(f'Loading {training_args.model_type} model')
             print('Train from scratch')
             config = AutoConfig.from_pretrained(model_args.model_name_or_path,
                 num_labels=train_dataset.num_labels)
@@ -373,38 +395,6 @@ def train():
                 token_type=training_args.token_type,
                 trust_remote_code=True,
             )        
-    elif training_args.model_type == 'hyena':
-        backbone_cfg = None
-        if training_args.train_from_scratch:
-            pass
-        else:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            print("Using device:", device)
-            model = HyenaForRNADegraPre.from_pretrained(
-                model_args.model_name_or_path,
-                #download=True,
-                config=backbone_cfg,
-                device=device,
-                use_head=False,
-                n_classes=train_dataset.num_labels,
-                problem_type="regression",
-                #token_type=training_args.token_type,
-            )
-
-
-    # configure LoRA
-    if model_args.use_lora:
-        lora_config = LoraConfig(
-            r=model_args.lora_r,
-            lora_alpha=model_args.lora_alpha,
-            target_modules=list(model_args.lora_target_modules.split(",")),
-            lora_dropout=model_args.lora_dropout,
-            bias="none",
-            task_type="SEQ_CLS",
-            inference_mode=False,
-        )
-        model = get_peft_model(model, lora_config)
-        model.print_trainable_parameters()
 
     # define trainer
     trainer = transformers.Trainer(model=model,
@@ -429,7 +419,9 @@ def train():
         os.makedirs(results_path, exist_ok=True)
         results_test = trainer.evaluate(eval_dataset=test_dataset)
         with open(os.path.join(results_path, "test_results.json"), "w") as f:
-            json.dump(results_test, f)
+            for key, value in results_test.items():
+                result_line = json.dumps({key: value})
+                f.write(result_line + "\n")
         
 
 

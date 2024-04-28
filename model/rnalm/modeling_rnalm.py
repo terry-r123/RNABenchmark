@@ -1598,8 +1598,6 @@ class RNALMForNucleotideLevel(BertPreTrainedModel):
         ori_length = weight_mask.shape[1]
         batch_size = final_input.shape[0]
         cur_length = int(final_input.shape[1])
-        #print(ori_length)
-        #print(cur_length)
 
         if self.config.token_type == 'single':
             assert attention_mask.shape==weight_mask.shape==post_token_length.shape
@@ -1607,11 +1605,7 @@ class RNALMForNucleotideLevel(BertPreTrainedModel):
         elif self.config.token_type == 'bpe' or  self.config.token_type=='non-overlap':
             logits = torch.zeros((batch_size, ori_length, self.num_labels), dtype=final_input.dtype, device=final_input.device)
             nucleotide_indices = {nucleotide: (input_ids == self.tokenizer.encode(nucleotide, add_special_tokens=False)[0]).nonzero() for nucleotide in 'ATCGN'}
-            #original_texts = [self.tokenizer.decode(ids,skip_special_tokens=True) for ids in input_ids]
-            padding_tensor = torch.zeros((batch_size, ori_length-cur_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
-            #print(padding_tensor.shape,final_input.shape)
-            mapping_final_input = torch.cat([padding_tensor, final_input], dim=1)
-            #mapping_final_input[:,0,:] = final_input[:,0,:] #[cls] token
+            mapping_final_input = torch.zeros((batch_size, ori_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
             for bz in range(batch_size):
                 start_index = 0
                 for i, length in enumerate(post_token_length[bz]): #astart from [cls]
@@ -1633,8 +1627,7 @@ class RNALMForNucleotideLevel(BertPreTrainedModel):
             #     for pos_id in range(1,ori_length-1):
             #         logits[bz,pos_id,:] = self.classifer_dict[ori_text[pos_id-1]](mapping_final_input[bz,pos_id, :])
         elif self.config.token_type == '6mer':
-            padding_tensor = torch.zeros((batch_size, ori_length-cur_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
-            mapping_final_input = torch.cat([padding_tensor, final_input], dim=1)
+            mapping_final_input = torch.zeros((batch_size, ori_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
             mapping_final_input[:,0,:] = final_input[:,0,:] #[cls] token
             for bz in range(batch_size):
                 value_length = torch.sum(attention_mask[bz,:]==1).item()
@@ -1768,3 +1761,143 @@ class RnalmForCRISPROffTarget(BertPreTrainedModel):
             attentions=None,
         )
 
+class RNALMForStructuralimputation(BertPreTrainedModel):
+    # include Degradation and SpliceAI
+    def __init__(self, config, tokenizer=None):
+        super().__init__(config)
+        self.num_labels = config.num_labels
+        self.config = config
+    
+        self.bert = BertModel(config)
+       
+        self.tokenizer = tokenizer
+        if self.config.token_type == 'bpe' or  self.config.token_type=='non-overlap':
+            self.down_mlp_a = nn.Linear(config.hidden_size, config.hidden_size)
+            self.down_mlp_t = nn.Linear(config.hidden_size, config.hidden_size)
+            self.down_mlp_c = nn.Linear(config.hidden_size, config.hidden_size)
+            self.down_mlp_g = nn.Linear(config.hidden_size, config.hidden_size)
+            self.down_mlp_n = nn.Linear(config.hidden_size, config.hidden_size)
+            self.down_mlp_dict = {
+                'A': self.down_mlp_a,
+                'T': self.down_mlp_t,
+                'C': self.down_mlp_c,
+                'G': self.down_mlp_g,
+                'N': self.down_mlp_n,
+                }
+        else:
+            self.down_mlp = nn.Linear(config.hidden_size, config.hidden_size)
+        self.embedding_struct = nn.Linear(1,config.hidden_size)
+        self.classifier = nn.Linear(config.hidden_size*2, config.num_labels)
+        # Initialize weights and apply final processing
+        self.post_init()
+
+
+    def forward(
+        self,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        token_type_ids: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
+        head_mask: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+        labels: Optional[torch.Tensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        struct: Optional[torch.Tensor] = None,
+        weight_mask: Optional[bool] = None,
+        post_token_length: Optional[bool] = None,
+    ) -> Union[Tuple[torch.Tensor], SequenceClassifierOutput]:
+        r"""
+        labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
+            Labels for computing the sequence classification/regression loss. Indices should be in `[0, ...,
+            config.num_labels - 1]`. If `config.num_labels == 1` a regression loss is computed (Mean-Square loss), If
+            `config.num_labels > 1` a classification loss is computed (Cross-Entropy).
+        """
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        
+        outputs = self.bert(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            # output_attentions=output_attentions,
+            # output_hidden_states=output_hidden_states,
+            # return_dict=return_dict,
+        )
+        final_input= outputs[0]
+
+        ### init mappint tensor
+        ori_length = weight_mask.shape[1]
+        batch_size = final_input.shape[0]
+        cur_length = int(final_input.shape[1])
+
+        if self.config.token_type == 'single':
+            assert attention_mask.shape==weight_mask.shape==post_token_length.shape
+            mapping_final_input = final_input
+        elif self.config.token_type == 'bpe' or  self.config.token_type=='non-overlap':
+            inter_input = torch.zeros((batch_size, ori_length, self.config.hidden_size), dtype=final_input.dtype, device=final_input.device)
+            nucleotide_indices = {nucleotide: (input_ids == self.tokenizer.encode(nucleotide, add_special_tokens=False)[0]).nonzero() for nucleotide in 'ATCGN'}
+            mapping_final_input = torch.zeros((batch_size, ori_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
+            for bz in range(batch_size):
+                start_index = 0
+                for i, length in enumerate(post_token_length[bz]): #astart from [cls]
+                    mapping_final_input[bz,start_index:start_index + int(length.item()), :] = final_input[bz,i,:]
+                    start_index += int(length.item())
+            for nucleotide, indices in nucleotide_indices.items(): # indices:[bzid,seqid]
+                #print(nucleotide, indices) 
+                if indices.numel() > 0:  
+                    bz_indices, pos_indices = indices.split(1, dim=1)
+                    bz_indices = bz_indices.squeeze(-1) 
+                    pos_indices = pos_indices.squeeze(-1)
+                    nucleotide_logits = self.down_mlp_dict[nucleotide](mapping_final_input[bz_indices, pos_indices])
+                    nucleotide_logits = nucleotide_logits.to(inter_input.dtype)
+                    inter_input.index_put_((bz_indices, pos_indices), nucleotide_logits)
+            mapping_final_input = inter_input[:,1:-1,:]
+        elif self.config.token_type == '6mer':
+            mapping_final_input = torch.zeros((batch_size, ori_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
+            mapping_final_input[:,0,:] = final_input[:,0,:] #[cls] token
+            for bz in range(batch_size):
+                value_length = torch.sum(attention_mask[bz,:]==1).item()
+                for i in range(1,value_length-1): #exclude cls,sep token
+                    mapping_final_input[bz,i:i+6,:] += final_input[bz,i]
+                mapping_final_input[bz,value_length+5-1,:] = final_input[bz,value_length-1,:] #[sep] token
+        #print(mapping_final_input.shape,weight_mask.shape)
+        mapping_final_input = mapping_final_input * weight_mask.unsqueeze(2)
+        if self.config.token_type == '6mer' or self.config.token_type =='single': 
+            mapping_final_input = self.down_mlp(mapping_final_input)[:,1:-1,:] # exclude <cls> and <eos>
+        # print(labels.shape)
+        # print(struct.shape,mapping_final_input.shape)
+        struct_input = self.embedding_struct(struct.unsqueeze(-1))
+        
+        final_input = torch.cat([mapping_final_input,struct_input], dim=-1)
+
+        logits = self.classifier(final_input)
+        label_mask = struct== -1
+
+    
+        loss = None
+        if labels is not None:
+            if self.config.problem_type is None:
+                if self.num_labels == 1:
+                    self.config.problem_type = "regression"
+            if self.config.problem_type == "regression":
+                loss_fct = nn.MSELoss()
+                
+                if self.num_labels == 1:
+                    loss = loss_fct(logits[label_mask].squeeze(), labels.squeeze())
+                    # print(loss)
+                else:
+                    loss = loss_fct(logits, labels)
+
+        if not return_dict:
+            output = (logits[label_mask],) + outputs[2:]
+            return ((loss,) + output) if loss is not None else output       
+        return SequenceClassifierOutput(
+            loss=loss,
+            logits=logits[label_mask],
+            hidden_states=None,
+            attentions=None,
+        )

@@ -1370,21 +1370,20 @@ class ESMForNucleotideLevel(EsmPreTrainedModel):
         ori_length = weight_mask.shape[1]
         batch_size = final_input.shape[0]
         cur_length = int(final_input.shape[1])
-
+        # [cls] and [sep] do not matter in this mode
         if self.config.token_type == 'single':
             assert attention_mask.shape==weight_mask.shape==post_token_length.shape
             mapping_final_input = final_input
         elif self.config.token_type == 'bpe' or  self.config.token_type=='non-overlap':
             logits = torch.zeros((batch_size, ori_length, self.num_labels), dtype=final_input.dtype, device=final_input.device)
             nucleotide_indices = {nucleotide: (input_ids == self.tokenizer.encode(nucleotide, add_special_tokens=False)[0]).nonzero() for nucleotide in 'ATCGN'}
-            #original_texts = [self.tokenizer.decode(ids,skip_special_tokens=True) for ids in input_ids]
-            padding_tensor = torch.zeros((batch_size, ori_length-cur_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
-            #print(padding_tensor.shape,final_input.shape)
-            mapping_final_input = torch.cat([padding_tensor, final_input], dim=1)
+            mapping_final_input = torch.zeros((batch_size, ori_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
+            #padding_tensor = torch.zeros((batch_size, ori_length-cur_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
+            #mapping_final_input = torch.cat([padding_tensor, final_input], dim=1)
             #mapping_final_input[:,0,:] = final_input[:,0,:] #[cls] token
             for bz in range(batch_size):
                 start_index = 0
-                for i, length in enumerate(post_token_length[bz]): #astart from [cls]
+                for i, length in enumerate(post_token_length[bz]): # start from [cls]
                     mapping_final_input[bz,start_index:start_index + int(length.item()), :] = final_input[bz,i,:]
                     start_index += int(length.item())
             for nucleotide, indices in nucleotide_indices.items(): # indices:[bzid,seqid]
@@ -1397,8 +1396,9 @@ class ESMForNucleotideLevel(EsmPreTrainedModel):
                     nucleotide_logits = nucleotide_logits.to(logits.dtype)
                     logits.index_put_((bz_indices, pos_indices), nucleotide_logits)
         elif self.config.token_type == '6mer':
-            padding_tensor = torch.zeros((batch_size, ori_length-cur_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
-            mapping_final_input = torch.cat([padding_tensor, final_input], dim=1)
+            mapping_final_input = torch.zeros((batch_size, ori_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
+            #padding_tensor = torch.zeros((batch_size, ori_length-cur_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
+            #mapping_final_input = torch.cat([padding_tensor, final_input], dim=1)
             mapping_final_input[:,0,:] = final_input[:,0,:] #[cls] token
             for bz in range(batch_size):
                 value_length = torch.sum(attention_mask[bz,:]==1).item()
@@ -1443,19 +1443,16 @@ class ESMForNucleotideLevel(EsmPreTrainedModel):
         )
 
 class ESMForStructuralimputation(EsmPreTrainedModel):
-    def __init__(self, config):
+    def __init__(self, config, tokenizer=None):
         super().__init__(config)
         self.num_labels = config.num_labels
         self.config = config
     
         self.esm = EsmModel(config, add_pooling_layer=False)
-        classifier_dropout = (
-            config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob
-        )
-        self.dropout = nn.Dropout(classifier_dropout)
-        self.down_mlp = nn.Linear(config.hidden_size, config.hidden_size//2)
-        self.embedding_struct = nn.Linear(1,config.hidden_size//2)
-        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+       
+        self.down_mlp = nn.Linear(config.hidden_size, config.hidden_size)
+        self.embedding_struct = nn.Linear(1,config.hidden_size)
+        self.classifier = nn.Linear(config.hidden_size*2, config.num_labels)
 
         # Initialize weights and apply final processing
         self.init_weights()
@@ -1484,7 +1481,6 @@ class ESMForStructuralimputation(EsmPreTrainedModel):
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        total_mask_dim = attention_mask.shape[1]
         outputs = self.esm(
             input_ids,
             attention_mask=attention_mask,
@@ -1495,43 +1491,16 @@ class ESMForStructuralimputation(EsmPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        #print(outputs[0].shape)
         final_input= outputs[0]
 
-        final_input= self.dropout(final_input)
         ### init mappint tensor
         ori_length = weight_mask.shape[1]
         batch_size = final_input.shape[0]
-        #cur_length = final_input.shape[1]
-        #assert cur_length == final_input.shape[1]
+        cur_length = int(final_input.shape[1])
         
         if self.config.token_type == 'single':
-            #assert ori_length==cur_length
             assert attention_mask.shape==weight_mask.shape==post_token_length.shape
             mapping_final_input = final_input
-        elif self.config.token_type == 'bpe':
-            padding_tensor = torch.zeros((batch_size, ori_length-cur_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
-            mapping_final_input =torch.cat([padding_tensor, final_input], dim=1)
-            mapping_final_input[:,0,:] = final_input[:,0,:] #[cls] token
-            for bz in range(batch_size):
-                start_index = 0
-                for i, length in enumerate(post_token_length[bz]):
-                    mapping_final_input[bz,start_index:start_index + length, :] = final_input[bz,i,:]
-                    start_index += length
-        elif self.config.token_type == '6mer':
-            padding_tensor = torch.zeros((batch_size, ori_length-cur_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
-            mapping_final_input =torch.cat([padding_tensor, final_input], dim=1)
-            mapping_final_input[:,0,:] = final_input[:,0,:] #[cls] token
-            for bz in range(batch_size):
-                value_length = torch.sum(attention_mask[bz,:]==1).item()
-                #print(value_length)
-                #assert 
-                for i in range(1,value_length-1): #exclude cls,sep token
-                    #print(i)
-                    #print(mapping_final_input.shape,final_input.shape)
-                    mapping_final_input[bz,i:i+6,:] += final_input[bz,i]
-                mapping_final_input[bz,value_length+5-1,:] = final_input[bz,value_length-1,:] #[sep] token
-
         mapping_final_input = mapping_final_input * weight_mask.unsqueeze(2)
         mapping_final_input = self.down_mlp(mapping_final_input)[:,1:-1,:] # exclude <cls> and <eos>
         # print(labels.shape)

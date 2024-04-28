@@ -33,9 +33,7 @@ do
 
     echo ${MODEL_PATH}
 
-    CUDA_VISIBLE_DEVICES=$gpu_device torchrun \
-        --nproc_per_node $nproc_per_node \
-        --master_port $master_port \
+    EXEC_PREFIX \
         downstream/train_mean_ribosome_loading.py \
             --model_name_or_path ${MODEL_PATH} \
             --data_path  ${DATA_PATH}/${data} \

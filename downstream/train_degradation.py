@@ -187,14 +187,14 @@ def bpe_position(texts,attn_mask, tokenizer):
     # print(tokenizer.tokenize(texts[0]))
     for i,text in enumerate(texts):   
         text = tokenizer.tokenize(text)
-        position_id[:, 0] = 1
+        position_id[:, 0] = 1 #[cls]
         index = 0
         for j, token in enumerate(text):
             index = j+1
             position_id[i,index] = len(token) #start after [cls]   
             # if i == 0:
             #     print(token,position_id[i,index],i,index,len(token))
-        position_id[i, index+1] = 1
+        position_id[i, index+1] = 1 #[sep]
         
     print(position_id[0,:])
     print('position_id.shape',position_id.shape)
@@ -260,7 +260,7 @@ class SupervisedDataset(Dataset):
                 self.weight_mask[:,i+1]=self.weight_mask[:,-i-2]=1/(i+1) 
             self.weight_mask[:, 6:-6] = 1/6
         self.post_token_length = torch.zeros(self.attention_mask.shape)
-        if args.token_type == 'bpe':
+        if args.token_type == 'bpe' or args.token_type == 'non-overlap':
             self.post_token_length = bpe_position(self.texts,self.attention_mask,tokenizer)
         self.num_labels = 3
     def __getitem__(self, index: int):
