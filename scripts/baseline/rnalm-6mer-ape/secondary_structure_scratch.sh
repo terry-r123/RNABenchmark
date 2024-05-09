@@ -1,16 +1,16 @@
 #!/bin/bash
 
-gpu_device="0"
+gpu_device="2"
 master_port=41611
 nproc_per_node=1
 partition='ai4bio'
 USE_SLURM='0'
-# 基础环境设置
+
 MODEL_TYPE='rnalm'
 
 task='Secondary_structure_prediction'
 
-# 根据 USE_SLURM 调整环境变量和执行前缀
+#  USE_SLURM or not
 if [ "$USE_SLURM" == "1" ]; then
     EXEC_PREFIX="srun --job-name=${MODEL_TYPE}_${data} --gres=gpu:$nproc_per_node --cpus-per-task=$(($nproc_per_node * 5)) --mem=50G"
 elif [ "$USE_SLURM" == "2" ]; then
@@ -29,35 +29,50 @@ elif [ "$USE_SLURM" == "2" ]; then
     EXEC_PREFIX="srun --nodes=1 -p $quotatype -A $partition --job-name=${MODEL_TYPE}_${task} --gres=gpu:$nproc_per_node --cpus-per-task=32 torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
 else
     data_root=/mnt/data/oss_beijing/   
-    EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
+    EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device accelerate launch --num_processes=$nproc_per_node --main_process_port=$master_port"
 fi
-# This is your argument
-export kmer=6
-export MODEL_PATH=/mnt/data/ai4bio/renyuchen/DNABERT/examples/output/rna/base/noncoding_rna_human_6mer_1024/checkpoint-80000
-export DATA_PATH=/mnt/data/ai4bio/rna/downstream/Secondary_structure_prediction/esm_data 
-export bprna_PATH=/mnt/data/ai4bio/rna/downstream/Secondary_structure_prediction/esm_data/bpRNA
-export OUTPUT_PATH=./outputs/ft/rna-all/secondary_structure/rna/baseline/rnalm-6mer-ape/scratch
-export STAGE=None
-export MODEL_TYPE='rnabert'
-export gpu_device=0
-export master_port=40123
 
 
-CUDA_VISIBLE_DEVICES=1  accelerate launch --num_processes=1 --main_process_port=${master_port} \
-downstream/train_secondary_structure.py \
---model_type ${MODEL_TYPE} \
---mode bprna \
---data_dir ${DATA_PATH} \
---bprna_dir ${bprna_PATH} \
---model_name_or_path ${MODEL_PATH} \
---ckpt_dir ${OUTPUT_PATH} \
---num_epochs 100 \
---batch_size 1 \
---gradient_accumulation_steps 2 \
---lr 3e-4 \
---num_workers 1 \
---token_type '6mer' \
---model_max_length 1026 \
---non_n True \
---train_from_scratch True \
+DATA_PATH=${data_root}multi-omics/RNA/downstream/${task}/esm_data/bpRNA
+batch_size=1
+data=''
+
+for token in 'single' 'bpe' 'non-overlap' '6mer' 
+do
+    for pos in 'ape' 'alibi' 'rope'
+    do 
+
+        MODEL_PATH=/mnt/data/ai4bio/renyuchen/RNABenchmark/model/rnalm/config/${MODEL_TYPE}-${token}-${pos}
+        OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/baseline/${MODEL_TYPE}-${token}-${pos}-scratch
+
+        for seed in 42 666 3407
+        do
+
+            echo ${MODEL_PATH}
+
+            ${EXEC_PREFIX} \
+            downstream/train_secondary_structure.py \
+            --mode bprna \
+            --data_path  ${DATA_PATH}/${data} \
+            --model_name_or_path ${MODEL_PATH} \
+            --output_dir ${OUTPUT_PATH} \
+            --run_name ${MODEL_TYPE}_${data}_seed${seed} \
+            --num_epochs 100 \
+            --per_device_train_batch_size ${batch_size} \
+            --per_device_eval_batch_size 1 \
+            --gradient_accumulation_steps 2 \
+            --lr 3e-5 \
+            --num_workers 1 \
+            --token_type ${token} \
+            --model_type ${MODEL_TYPE} \
+            --model_max_length 1026 \
+            --train_from_scratch True \
+
+        done
+    done
+done
+
+
+
+
 

@@ -1,6 +1,6 @@
 import warnings
 warnings.filterwarnings("ignore")
-from transformers import EsmTokenizer, EsmModel, BertForMaskedLM, BertModel, AutoConfig
+from transformers import EsmTokenizer, EsmModel, BertForMaskedLM, BertModel, AutoConfig, BertTokenizer
 
 from transformers import Trainer, TrainingArguments, BertTokenizer
 import transformers
@@ -13,7 +13,7 @@ sys.path.append(parent_dir)
 
 from model.rnalm.rnalm_config import RNALMConfig
 from model.rnalm.modeling_rnalm import RNALMModel 
-
+from model.rnalm.rnalm_tokenizer import RNALMTokenizer
 
 def get_extractor(args):
     '''
@@ -97,7 +97,7 @@ def get_extractor(args):
             args.model_name_or_path,
             )    
     elif args.model_type == 'rnalm':
-        tokenizer = EsmTokenizer.from_pretrained(
+        tokenizer = RNALMTokenizer.from_pretrained(
             args.model_name_or_path,
             cache_dir=args.cache_dir,
             model_max_length=args.model_max_length,
