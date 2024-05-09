@@ -8,7 +8,7 @@ USE_SLURM='0'
 # 基础环境设置
 MODEL_TYPE='rnalm'
 
-task='Degradation'
+task='SpliceAI'
 
 # 根据 USE_SLURM 调整环境变量和执行前缀
 if [ "$USE_SLURM" == "1" ]; then
@@ -35,25 +35,25 @@ fi
 # 基础环境设置
 
 
-for token in  'bpe' 'non-overlap' #'single' '6mer'
+for token in 'single' 'bpe' 'non-overlap' '6mer' 
 do
     for pos in 'ape' 'alibi' 'rope'
     do 
 
         MODEL_PATH=/mnt/data/ai4bio/renyuchen/RNABenchmark/model/rnalm/config/${MODEL_TYPE}-${token}-${pos}
-        DATA_PATH=${data_root}multi-omics/RNA/downstream/degradation/train-val-test
+        DATA_PATH=${data_root}multi-omics/RNA/downstream/${task}
         OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/baseline/${MODEL_TYPE}-${token}-${pos}-scratch
         batch_size=32
         CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1
         data=''
-        data_file_train=train_1.json; data_file_val="val_1.json"; data_file_test="test_1.json"
+        data_file_train=train.csv; data_file_val="val.csv"; data_file_test="test.csv"
         for seed in 42 666 3407
         do
 
             echo ${MODEL_PATH}
 
             ${EXEC_PREFIX} \
-                downstream/train_degradation.py \
+                downstream/train_spliceai.py \
                     --model_name_or_path ${MODEL_PATH} \
                     --data_path  ${DATA_PATH}/${data} \
                     --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
@@ -63,10 +63,10 @@ do
                     --per_device_eval_batch_size 32 \
                     --gradient_accumulation_steps 1 \
                     --learning_rate 3e-5 \
-                    --num_train_epochs 100 \
+                    --num_train_epochs 30 \
                     --fp16 \
                     --save_steps 400 \
-                    --output_dir ${OUTPUT_PATH} \
+                    --output_dir ${OUTPUT_PATH}/${data} \
                     --evaluation_strategy steps \
                     --eval_steps 200 \
                     --warmup_steps 50 \
@@ -78,12 +78,6 @@ do
                     --token_type ${token} \
                     --model_type ${MODEL_TYPE} \
                     --train_from_scratch True
-
-            for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do export $v=http://58.34.83.134:31280; done
-
-            kaggle competitions submit -c stanford-covid-vaccine -f ${OUTPUT_PATH}/results/${MODEL_TYPE}${data}_seed${seed}/submission_rnalm-${token}-${pos}-scratch.csv -m "Message"
-
-
         done
     done
 done

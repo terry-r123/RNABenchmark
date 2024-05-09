@@ -88,6 +88,7 @@ class TrainingArguments(transformers.TrainingArguments):
     token_type: str = field(default='6mer')
     train_from_scratch: bool = field(default=False)
     log_dir: str = field(default="output")
+    attn_implementation: str = field(default="eager")
 
 def set_seed(args):
     random.seed(args.seed)
@@ -170,6 +171,20 @@ def load_or_generate_kmer(data_path: str, texts: List[str], k: int) -> List[str]
         
     return kmer
 
+def bpe_position(texts,attn_mask, tokenizer):
+    position_id = torch.zeros(attn_mask.shape)
+    for i,text in enumerate(texts):   
+        text = tokenizer.tokenize(text)
+        position_id[:, 0] = 1 #[cls]
+        index = 0
+        for j, token in enumerate(text):
+            index = j+1
+            position_id[i,index] = len(token) #start after [cls]   
+        position_id[i, index+1] = 1 #[sep]
+        
+    print(position_id[0,:])
+    print('position_id.shape',position_id.shape)
+    return position_id
 class SupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
@@ -221,14 +236,15 @@ class SupervisedDataset(Dataset):
         self.attention_mask = output["attention_mask"]
 
         self.labels = labels
+        #print(labels.shape)
         self.weight_mask = torch.ones((self.input_ids.shape[0],seq_length+2))
         if args.token_type == '6mer':
             for i in range(1,5):
                 self.weight_mask[:,i+1]=self.weight_mask[:,-i-2]=1/(i+1) 
             self.weight_mask[:, 6:-6] = 1/6
         self.post_token_length = torch.zeros(self.attention_mask.shape)
-        if args.token_type == 'bpe':
-            self.post_token_length = bpe_position(self.texts,self.attention_mask,tokenizer)
+        if args.token_type == 'bpe' or args.token_type == 'non-overlap':
+            self.post_token_length = bpe_position(texts,self.attention_mask,tokenizer)
         self.num_labels = 3
 
     def __len__(self):
@@ -243,7 +259,9 @@ class SupervisedDataset(Dataset):
 class DataCollatorForSupervisedDataset(object):
     """Collate examples for supervised fine-tuning."""
 
-    tokenizer: transformers.PreTrainedTokenizer
+    def __init__(self, tokenizer: transformers.PreTrainedTokenizer, args):
+        self.tokenizer = tokenizer
+        self.args = args
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         input_ids, labels, attention_mask, weight_mask, post_token_length  = tuple([instance[key] for instance in instances] for key in ("input_ids" ,"labels", "attention_mask","weight_mask","post_token_length"))
@@ -252,6 +270,7 @@ class DataCollatorForSupervisedDataset(object):
         attention_mask = torch.stack(attention_mask)
         weight_mask = torch.stack(weight_mask)
         post_token_length = torch.stack(post_token_length)
+        #print(labels.shape)
         return dict(
             input_ids=input_ids,
             labels=labels,
@@ -315,6 +334,7 @@ Compute metrics used for huggingface trainer.
 """
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
+    print(labels.shape,logits.shape)
     return calculate_metric_with_sklearn(logits, labels)
 
 
@@ -357,19 +377,18 @@ def train():
     test_dataset = SupervisedDataset(tokenizer=tokenizer, args=training_args,
                                      data_path=os.path.join(data_args.data_path, data_args.data_test_path), 
                                      kmer=data_args.kmer)
-    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
+    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer,args=training_args)
     print(f'# train: {len(train_dataset)},val:{len(val_dataset)},test:{len(test_dataset)}')
 
     # load model
     if training_args.model_type == 'rnalm':
         if training_args.train_from_scratch:
-            #print('Loading 6mer model')
             print('Train from scratch')
             config = RNALMConfig.from_pretrained(model_args.model_name_or_path,
                 num_labels=train_dataset.num_labels,
                 problem_type="single_label_classification",
                 token_type=training_args.token_type,
-                use_flash_att = False,
+                attn_implementation=training_args.attn_implementation,
                 )
             print(config)
             model =  RNALMForNucleotideLevel(
@@ -434,11 +453,7 @@ def train():
         
         results_test = trainer.evaluate(eval_dataset=test_dataset)
         with open(os.path.join(results_path, "test_results.json"), "w") as f:
-            for key, value in results_test.items():
-                result_line = json.dumps({key: value})
-                f.write(result_line + "\n")
-        # with open(os.path.join(results_path, "test_results.json"), "w") as f:
-        #     json.dump(results_test, f)
+            json.dump(results_test, f, indent=4)
         
 
 

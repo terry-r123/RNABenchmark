@@ -336,7 +336,7 @@ def train():
             use_fast=True,
             trust_remote_code=True,
         )
-    if training_args.model_type == 'hyenadna':
+    elif training_args.model_type == 'hyenadna':
         tokenizer = HyenaDNATokenizer.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,

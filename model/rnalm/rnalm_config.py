@@ -24,7 +24,7 @@ class RNALMConfig(TransformersEsmConfig):
         alibi_starting_size: int = 512,
         attention_probs_dropout_prob: float = 0.0,
         use_ALiBi=None,
-        use_flash_attn=None,
+        attn_implementation='eager',
         token_type=None,
         **kwargs,
     ):
@@ -39,7 +39,7 @@ class RNALMConfig(TransformersEsmConfig):
         super().__init__(**kwargs)
         self.alibi_starting_size = alibi_starting_size
         self.use_ALiBi =use_ALiBi
-        self.use_flash_attn =use_flash_attn
+        self.attn_implementation = attn_implementation
         self.token_type = token_type
 
 

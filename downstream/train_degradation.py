@@ -53,8 +53,9 @@ class ModelArguments:
 class DataArguments:
     data_path: str = field(default=None, metadata={"help": "Path to the training data."})
     kmer: int = field(default=-1, metadata={"help": "k-mer for input sequence. -1 means not using k-mer."})
-    delete_n: bool = field(default=False, metadata={"help": "data delete N"})
-
+    data_train_path: str = field(default=None, metadata={"help": "Path to the training data."})
+    data_val_path: str = field(default=None, metadata={"help": "Path to the training data."})
+    data_test_path: str = field(default=None, metadata={"help": "Path to the test data. is list"})
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
@@ -422,10 +423,10 @@ def train():
     if 'mer' in training_args.token_type:
         data_args.kmer=int(training_args.token_type[0])
 
-    train_dataset = SupervisedDataset(os.path.join(data_args.data_path,'train_1.json'), tokenizer, signal_noise_cutoff=0.6, test_set=None, kmer=data_args.kmer, args=training_args)
-    val_dataset = SupervisedDataset(os.path.join(data_args.data_path,'val_1.json'), tokenizer, signal_noise_cutoff=1.0, test_set=None, kmer=data_args.kmer, args=training_args)
-    public_test_dataset = SupervisedDataset(os.path.join(data_args.data_path,'test_1.json'), tokenizer, signal_noise_cutoff=-99.0, test_set='public', kmer=data_args.kmer, args=training_args)
-    private_test_dataset = SupervisedDataset(os.path.join(data_args.data_path,'test_1.json'), tokenizer, signal_noise_cutoff=-99.0, test_set='private', kmer=data_args.kmer, args=training_args)
+    train_dataset = SupervisedDataset(os.path.join(data_args.data_path, data_args.data_train_path), tokenizer, signal_noise_cutoff=0.6, test_set=None, kmer=data_args.kmer, args=training_args)
+    val_dataset = SupervisedDataset(os.path.join(data_args.data_path, data_args.data_val_path), tokenizer, signal_noise_cutoff=1.0, test_set=None, kmer=data_args.kmer, args=training_args)
+    public_test_dataset = SupervisedDataset(os.path.join(data_args.data_path, data_args.data_test_path), tokenizer, signal_noise_cutoff=-99.0, test_set='public', kmer=data_args.kmer, args=training_args)
+    private_test_dataset = SupervisedDataset(os.path.join(data_args.data_path, data_args.data_test_path), tokenizer, signal_noise_cutoff=-99.0, test_set='private', kmer=data_args.kmer, args=training_args)
     #print(len(public_test_dataset))
     data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
     test_data_collator = TestDataCollatorForSupervisedDataset(tokenizer=tokenizer)

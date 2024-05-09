@@ -320,7 +320,8 @@ def train():
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     set_seed(training_args)
     # load tokenizer
-    if training_args.model_type == 'rnalm':
+    print(training_args.model_type)
+    if training_args.model_type == 'rnalm' or  training_args.model_type == 'ntv2':
         tokenizer = EsmTokenizer.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
@@ -517,9 +518,7 @@ def train():
             os.makedirs(results_path, exist_ok=True)
             results_test = trainer.evaluate(eval_dataset=test_dataset)
             with open(os.path.join(results_path, f"{data_test}_results.json"), "w") as f:
-                for key, value in results_test.items():
-                    result_line = json.dumps({key: value})
-                    f.write(result_line + "\n")
+                json.dump(results_test, f, indent=4)
         # results_path = os.path.join(training_args.output_dir, "results", training_args.run_name)
         
         # os.makedirs(results_path, exist_ok=True)

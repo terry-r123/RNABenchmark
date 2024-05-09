@@ -369,7 +369,6 @@ def train():
             print(config)
             model =  RNALMForSequenceClassification(
                 config,
-                problem_type="regression",
                 )
         else:
             print('Loading rnalm model')

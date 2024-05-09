@@ -85,7 +85,7 @@ class TrainingArguments(transformers.TrainingArguments):
     token_type: str = field(default='6mer')
     train_from_scratch: bool = field(default=False)
     log_dir: str = field(default="output")
-
+    attn_implementation: str = field(default="eager")
 def set_seed(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -242,9 +242,10 @@ class SupervisedDataset(Dataset):
             self.weight_mask[:, 6:-6] = 1/6
         self.post_token_length = torch.zeros(self.attention_mask.shape)
         if args.token_type == 'bpe' or args.token_type == 'non-overlap':
-            self.post_token_length = bpe_position(self.texts,self.attention_mask,tokenizer)
+            self.post_token_length = bpe_position(texts,self.attention_mask,tokenizer)
 
         self.labels = labels
+        #print(labels.shape)
         self.struct = struct
         self.num_labels = 1
 
@@ -274,8 +275,8 @@ class DataCollatorForSupervisedDataset(object):
         #print(struct)
         #print(labels.shape,struct.shape)
         label_mask = struct == -1
-        # print("Label mask shape:", label_mask.shape) 
-        # print(labels[label_mask].shape)
+        #print("Label mask shape:", label_mask.shape) 
+        #print(labels[label_mask].shape)
         return dict(
             input_ids=input_ids,
             labels=labels[label_mask],
@@ -291,6 +292,7 @@ Manually calculate the mse and r^2.
 def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
     labels = labels.squeeze()
     logits = logits.squeeze()
+    #print(labels.shape,logits.shape)
     return {
         "r^2" : scipy.stats.pearsonr(labels, logits)[0]**2,
         "mse": sklearn.metrics.mean_squared_error(labels, logits),
@@ -301,6 +303,7 @@ Compute metrics used for huggingface trainer.
 """
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
+    #print(labels.shape,logits.shape)
     return calculate_metric_with_sklearn(logits, labels)
 
 
@@ -349,18 +352,17 @@ def train():
     # load model
     if training_args.model_type == 'rnalm':
         if training_args.train_from_scratch:
-            #print('Loading 6mer model')
             print('Train from scratch')
             config = RNALMConfig.from_pretrained(model_args.model_name_or_path,
                 num_labels=train_dataset.num_labels,
                 problem_type="regression",
                 token_type=training_args.token_type,
-                use_flash_att = False,
+                attn_implementation=training_args.attn_implementation,
                 )
             print(config)
             model =  RNALMForStructuralimputation(
                 config,
-                tokenizer=tokenizer,
+                tokenizer=tokenizer,          
                 )
         else:
             print(f'Loading {training_args.model_type} model')
@@ -419,9 +421,7 @@ def train():
         os.makedirs(results_path, exist_ok=True)
         results_test = trainer.evaluate(eval_dataset=test_dataset)
         with open(os.path.join(results_path, "test_results.json"), "w") as f:
-            for key, value in results_test.items():
-                result_line = json.dumps({key: value})
-                f.write(result_line + "\n")
+            json.dump(results_test, f, indent=4)
         
 
 

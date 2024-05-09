@@ -1,16 +1,19 @@
 import warnings
 warnings.filterwarnings("ignore")
 from transformers import EsmTokenizer, EsmModel, BertForMaskedLM, BertModel, AutoConfig
-#from mmoe.mmoe_layer import DNATokenizer, MMoeBertForSequenceClassification
-#from bert_config import BertConfig
+
 from transformers import Trainer, TrainingArguments, BertTokenizer
 import transformers
 import sys
-sys.path.append("..") 
-#from dna_module.tokenization_dna import DNATokenizer
+import os
+current_path = os.path.dirname(os.path.abspath(__file__))
+parent_dir = (os.path.dirname(os.path.dirname(current_path)))
+print(parent_dir)
+sys.path.append(parent_dir)
+
 from model.rnalm.rnalm_config import RNALMConfig
-from model.rnalm.modeling_rnalm import BertModel as FlashBertModel
-#from dnabert2_source.bert_layers import BertModel as DNABERT2
+from model.rnalm.modeling_rnalm import RNALMModel 
+
 
 def get_extractor(args):
     '''
@@ -94,30 +97,26 @@ def get_extractor(args):
             args.model_name_or_path,
             )    
     elif args.model_type == 'rnalm':
-        print('yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy')
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
+        tokenizer = EsmTokenizer.from_pretrained(
             args.model_name_or_path,
             cache_dir=args.cache_dir,
             model_max_length=args.model_max_length,
             padding_side="right",
             use_fast=True,
-            # trust_remote_code=True,
+            trust_remote_code=True,
             )
         # print('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
         # print(tokenizer)
         if args.train_from_scratch:
-            print('Loading rnabert model')
-            print('Train from scratch')
+            print(f'Train from scratch {args.model_type} model')
             config = RNALMConfig.from_pretrained(args.model_name_or_path)
-            extractor = FlashBertModel(config)
+            extractor = RNALMModel(config)
         else:           
-            extractor = FlashBertModel.from_pretrained(
+            extractor = RNALMModel.from_pretrained(
                 args.model_name_or_path,
             )
         
-    elif args.model_type == 'mmoe':
-        pass
-    print('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
+  
     #print(extractor)
     print(tokenizer)
     return extractor, tokenizer

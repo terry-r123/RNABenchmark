@@ -6,14 +6,10 @@ import logging
 import pdb
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Sequence, Tuple, List
-# from model_regression_bert_flash import BertForSequenceClassification as BertForSequenceClassification_flash
-# from model_regression_bert_flash_concat import BertForSequenceClassification as BertForSequenceClassification_flash
-# from model_regression_nt import EsmForSequenceClassification
-#from dnabert2_source.bert_layers import BertForSequenceReg512ConcatStep2 as BertForSequenceClassificationReg
+
 import random
 from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel, EarlyStoppingCallback
-# import os
-# os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+
 
 import torch
 import transformers
@@ -24,9 +20,12 @@ import re
 from torch.utils.data import Dataset
 
 import sys
-sys.path.append("..")
-from RNABenchmark.model.rnalm.modeling_rnalm import BertForSequenceClassification
-from RNABenchmark.model.rnalm.rnalm_config import RNALMConfig
+current_path = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_path)
+sys.path.append(parent_dir)
+
+from model.rnalm.modeling_rnalm import RNALMForSequenceClassification
+from model.rnalm.rnalm_config import RNALMConfig
 from model.esm.modeling_esm import EsmForSequenceClassification
 
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
@@ -269,14 +268,7 @@ def train():
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     set_seed(training_args)
     # load tokenizer
-    if training_args.model_type == 'hyena':
-        tokenizer = CharacterTokenizer(
-            characters=['A', 'C', 'G', 'T', 'N'],  # add DNA characters, N is uncertain
-            model_max_length=training_args.model_max_length + 2,  # to account for special tokens, like EOS
-            add_special_tokens=False,  # we handle special tokens elsewhere
-            padding_side='left', # since HyenaDNA is causal, we pad on the left
-        )
-    elif training_args.model_type == 'rnalm':
+    if training_args.model_type == 'rnalm':
         tokenizer = EsmTokenizer.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
@@ -300,16 +292,16 @@ def train():
     if 'mer' in training_args.token_type:
         data_args.kmer=int(training_args.token_type[0])
     # define datasets and data collator
-    train_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=data_args,
-                                      data_path=os.path.join(data_args.data_path, "train.csv"), 
+    train_dataset = SupervisedDataset(tokenizer=tokenizer, args=training_args,
+                                     data_path=os.path.join(data_args.data_path, data_args.data_train_path), 
                                       kmer=data_args.kmer)
-    val_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=data_args,
-                                     data_path=os.path.join(data_args.data_path, "val.csv"), 
+    val_dataset = SupervisedDataset(tokenizer=tokenizer, args=training_args,
+                                     data_path=os.path.join(data_args.data_path, data_args.data_val_path), 
                                      kmer=data_args.kmer)
-    test_dataset = SupervisedDataset(tokenizer=tokenizer, data_args=data_args,
-                                     data_path=os.path.join(data_args.data_path, "test.csv"), 
+    test_dataset = SupervisedDataset(tokenizer=tokenizer, args=training_args,
+                                     data_path=os.path.join(data_args.data_path, data_args.data_test_path), 
                                      kmer=data_args.kmer)
-    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
+    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer,args=training_args)
     print(f'# train: {len(train_dataset)},val:{len(val_dataset)},test:{len(test_dataset)}')
 
     # load model
@@ -339,23 +331,6 @@ def train():
                 problem_type="regression",
                 token_type=training_args.token_type,
                 )
-    elif training_args.model_type == 'hyena':
-        backbone_cfg = None
-        if training_args.train_from_scratch:
-            pass
-        else:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            print("Using device:", device)
-            model = HyenaForRNADegraPre.from_pretrained(
-                model_args.model_name_or_path,
-                #download=True,
-                config=backbone_cfg,
-                device=device,
-                use_head=False,
-                n_classes=train_dataset.num_labels,
-                problem_type="regression",
-                #token_type=training_args.token_type,
-            )
     elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm':
         if training_args.train_from_scratch:
             pass
