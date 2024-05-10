@@ -219,7 +219,8 @@ def main(args):
     test_loss_list = []
     step = 0
     best_val, best_test = 0, []
-    
+    patience = args.patience
+    early_stop_flag = 0
     for epoch in range(args.num_epochs):
         model.train()
         start_time = time.time()
@@ -256,7 +257,13 @@ def main(args):
             print(f"epoch {epoch}:")
             test_metrics=test(model, test_dataloader_list[i], accelerator)
             best_test = test_metrics
-     
+            early_stop_flag = 0 
+        else:
+            early_stop_flag +=1
+
+        if early_stop_flag >= patience:
+            print(f"Early stopping")
+            break
 
         end_time = time.time()
 
@@ -299,6 +306,7 @@ if __name__ == "__main__":
     parser.add_argument('--cache_dir', type=str, default=None)
     parser.add_argument('--train_from_scratch', type=bool, default=False)
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--patience', type=int, default=3)
     parser.add_argument('--data_train_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
     parser.add_argument('--data_val_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
     parser.add_argument('--data_test_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')

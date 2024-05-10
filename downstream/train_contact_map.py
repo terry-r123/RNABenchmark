@@ -307,7 +307,8 @@ def main(args):
     test_loss_list = []
     step = 0
     best_val, best_test = 0, []
-    
+    patience = args.patience
+    early_stop_flag = 0
     for epoch in range(args.num_epochs):
         model.train()
         start_time = time.time()
@@ -365,31 +366,13 @@ def main(args):
             for i,data_test in enumerate(data_test_list):
                 test_metrics.append(test(model, test_dataloader_list[i], accelerator))
             best_test = test_metrics
-        # with torch.no_grad():
-        #     model.eval()
-        #     for data_dict in tqdm(test_loader):
-        #         for key in data_dict:
-        #             data_dict[key] = data_dict[key].to(accelerator.device)
+            early_stop_flag = 0 
+        else:
+            early_stop_flag +=1
 
-        #         logits = model(data_dict)
-        #         labels = data_dict['struct']
-        #         label_mask = labels != -1
-        #         outputs_list.append(logits[label_mask].detach().cpu().numpy().reshape(-1,1))
-        #         targets_list.append(labels[label_mask].detach().cpu().numpy().reshape(-1,1))
-        #         loss = criterion(logits[label_mask].reshape(-1,1), labels[label_mask].reshape(-1,1))
-        #         test_loss_list.append(loss.item())
-        #     logits = np.concatenate(outputs_list,axis = 0)
-        #     labels = np.concatenate(targets_list,axis = 0)
-        #     test_metrics = calculate_metric_with_sklearn(logits, labels)
-        #     print(f'\nTest: Top-l precision: {test_metrics["top_l_precision"]}, Top-l/2 precision: {test_metrics["top_l/2_precision"]}, Top-l/5 precision: {test_metrics["top_l/5_precision"]}, Top-l/10 precision: {test_metrics["top_l/10_precision"]}')
-
-                
-
-        # if best_val < val_metrics["top_l_precision"]:
-        #     best_val = val_metrics["top_l_precision"]
-
-        # if best_test < test_metrics["top_l_precision"]:
-        #     best_test = test_metrics["top_l_precision"]
+        if early_stop_flag >= patience:
+            print(f"Early stopping")
+            break
 
         end_time = time.time()
 
@@ -443,6 +426,7 @@ if __name__ == "__main__":
     parser.add_argument('--cache_dir', type=str, default=None)
     parser.add_argument('--train_from_scratch', type=bool, default=False)
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--patience', type=int, default=3)
     parser.add_argument('--data_train_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
     parser.add_argument('--data_val_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
     parser.add_argument('--data_test_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
