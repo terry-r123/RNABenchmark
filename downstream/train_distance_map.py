@@ -269,11 +269,13 @@ def main(args):
         test_auc_list, test_recall_list, test_precision_list, test_f1_list = [], [], [], []
 
         threshold = 0.5
+        print(f"epoch {epoch}:")
         val_metrics = test(model, val_loader, accelerator)
       
 
         if best_val < val_metrics["r^2"]:
             best_val = val_metrics["r^2"] 
+            print(f"epoch {epoch}:")
             test_metrics = []   
             for i,data_test in enumerate(data_test_list):
                 test_metrics.append(test(model, test_dataloader_list[i], accelerator))

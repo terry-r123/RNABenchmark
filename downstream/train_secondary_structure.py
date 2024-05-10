@@ -77,15 +77,14 @@ class collator():
      
         max_len = max([len(seq) for seq in seqs])
         #max_len = min(max_len, self.tokenizer.model_max_length)
-        print(max_len)
+
         weight_mask = torch.ones((len(seqs), max_len+2)) #including [cls] and [sep], dim= [bz, max_len+2]
         if self.args.token_type == '6mer':
             for i in range(1,5):
                 weight_mask[:,i+1]=weight_mask[:,-i-2]=1/(i+1) 
             weight_mask[:, 6:-6] = 1/6
             seqs = [generate_kmer_str(seq, 6) for seq in seqs]
-        print(seqs)
-        print(weight_mask.shape)
+ 
         data_dict = self.tokenizer(seqs, 
                         padding='longest', 
                         max_length=self.tokenizer.model_max_length, 
@@ -120,20 +119,20 @@ def test(model, test_loader, accelerator):
 
             logits = model(data_dict)[:,1:-1,1:-1]
             labels = data_dict['struct']
-            print(labels.shape)
+            #print(labels.shape)
             label_mask = labels != -1
             outputs_list.append(logits.detach().cpu().numpy().reshape(-1,1))
             targets_list.append(labels.detach().cpu().numpy().reshape(-1,1))
-            print(logits.shape,labels.shape)
+            #print(logits.shape,labels.shape)
             #loss = criterion(logits[label_mask].reshape(-1,1), labels[label_mask].reshape(-1,1))
             #test_loss_list.append(loss.item())
         logits = np.concatenate(outputs_list,axis = 0)
         labels = np.concatenate(targets_list,axis = 0)
-    print('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
-    print(len(outputs_list))
-    metrics = calculate_metric_with_sklearn(outputs_list, targets_list)
-    print('yyyyyyyyyyyyyyyyyyyyyyyyyyyy')
-    print(f'\nTest: Top-l precision: {metrics["top_l_precision"]}, Top-l/2 precision: {metrics["top_l/2_precision"]}, Top-l/5 precision: {metrics["top_l/5_precision"]}, Top-l/10 precision: {metrics["top_l/10_precision"]}')
+    
+    #print(len(outputs_list))
+    metrics = calculate_metric_with_sklearn(logits, labels)
+    
+    print(f'\nTest: Precision: {metrics["precision"]}, Recall: {metrics["recall"]}, F1: {metrics["f1"]}')
     return metrics
 
 def main(args):
@@ -228,8 +227,8 @@ def main(args):
             with accelerator.accumulate(model):
                 logits = model(data_dict)[:,1:-1,1:-1]
                 labels = data_dict['struct']
-                print('label',labels.shape)
-                print('logits',logits.shape)
+                #print('label',labels.shape)
+                #print('logits',logits.shape)
                 label_mask = labels != -1 
                 loss = criterion(logits[label_mask].reshape(-1,1), labels[label_mask].reshape(-1,1))
  
@@ -248,12 +247,13 @@ def main(args):
         test_auc_list, test_recall_list, test_precision_list, test_f1_list = [], [], [], []
 
         threshold = 0.5
+        print(f"epoch {epoch}:")
         val_metrics = test(model, val_loader, accelerator)
     
         if best_val < val_metrics["f1"]:
             best_val = val_metrics["f1"] 
             test_metrics = {}
-            
+            print(f"epoch {epoch}:")
             test_metrics=test(model, test_dataloader_list[i], accelerator)
             best_test = test_metrics
      

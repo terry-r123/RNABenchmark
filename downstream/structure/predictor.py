@@ -71,7 +71,7 @@ class SSCNNPredictor(nn.Module):
         cur_length = int(hidden_states.shape[1])
 
         if self.args.token_type == 'single':
-            print(attention_mask.shape,weight_mask.shape,post_token_length.shape)
+            #print(attention_mask.shape,weight_mask.shape,post_token_length.shape)
             assert attention_mask.shape==weight_mask.shape==post_token_length.shape
             mapping_hidden_states = hidden_states
         elif self.args.token_type == 'bpe' or  self.args.token_type=='non-overlap':
@@ -98,6 +98,7 @@ class SSCNNPredictor(nn.Module):
             mapping_hidden_states[:,0,:] = hidden_states[:,0,:] #[cls] token
             for bz in range(batch_size):
                 value_length = torch.sum(attention_mask[bz,:]==1).item()
+                print(value_length)
                 for i in range(1,value_length-1): #exclude cls,sep token
                     mapping_hidden_states[bz,i:i+6,:] += hidden_states[bz,i]
                 mapping_hidden_states[bz,value_length+5-1,:] = hidden_states[bz,value_length-1,:] #[sep] token

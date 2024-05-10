@@ -97,16 +97,30 @@ def get_extractor(args):
             args.model_name_or_path,
             )    
     elif args.model_type == 'rnalm':
-        tokenizer = RNALMTokenizer.from_pretrained(
-            args.model_name_or_path,
-            cache_dir=args.cache_dir,
-            model_max_length=args.model_max_length,
-            padding_side="right",
-            use_fast=True,
-            trust_remote_code=True,
-            )
+        if args.token_type != 'single':
+            tokenizer = EsmTokenizer.from_pretrained(
+                args.model_name_or_path,
+                cache_dir=args.cache_dir,
+                model_max_length=args.model_max_length,
+                padding_side="right",
+                use_fast=True,
+                trust_remote_code=True,
+                token_type=args.token_type
+                )
+            #RNALMTokenizer = EsmTokenizer
+        else:
+            #RNALMTokenizer = RNALMTokenizer
+            tokenizer = RNALMTokenizer.from_pretrained(
+                args.model_name_or_path,
+                cache_dir=args.cache_dir,
+                model_max_length=args.model_max_length,
+                padding_side="right",
+                use_fast=True,
+                trust_remote_code=True,
+                token_type=args.token_type
+                )
         # print('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
-        # print(tokenizer)
+        print(tokenizer)
         if args.train_from_scratch:
             print(f'Train from scratch {args.model_type} model')
             config = RNALMConfig.from_pretrained(args.model_name_or_path)

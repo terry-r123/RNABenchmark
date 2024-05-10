@@ -337,6 +337,7 @@ def main(args):
         test_auc_list, test_recall_list, test_precision_list, test_f1_list = [], [], [], []
 
         threshold = 0.5
+        print(f"epoch {epoch}:")
         val_metrics = test(model, val_loader, accelerator)
         # with torch.no_grad():
         #     model.eval()
@@ -359,6 +360,7 @@ def main(args):
 
         if best_val < val_metrics["top_l_precision"]:
             best_val = val_metrics["top_l_precision"] 
+            print(f"epoch {epoch}:")
             test_metrics = []   
             for i,data_test in enumerate(data_test_list):
                 test_metrics.append(test(model, test_dataloader_list[i], accelerator))

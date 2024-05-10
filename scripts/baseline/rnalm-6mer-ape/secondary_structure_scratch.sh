@@ -1,6 +1,6 @@
 #!/bin/bash
 
-gpu_device="2"
+gpu_device="0"
 master_port=41611
 nproc_per_node=1
 partition='ai4bio'
@@ -37,7 +37,7 @@ DATA_PATH=${data_root}multi-omics/RNA/downstream/${task}/esm_data/bpRNA
 batch_size=1
 data=''
 
-for token in 'single' 'bpe' 'non-overlap' '6mer' 
+for token in 'bpe' #'6mer' 'single' 'non-overlap' 
 do
     for pos in 'ape' 'alibi' 'rope'
     do 
