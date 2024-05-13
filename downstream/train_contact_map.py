@@ -23,7 +23,7 @@ import scipy
 from sklearn import metrics
 from sklearn.metrics import precision_score, recall_score, f1_score
 import random
-
+import json
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 def generate_kmer_str(sequence: str, k: int) -> str:
@@ -70,28 +70,28 @@ def calculate_metric_with_sklearn(logits_list: [np.ndarray], labels_list: [np.nd
     top_L_5_FP = []
     top_L_10_TP = []
     top_L_10_FP = []
-    print('labels_list',labels_list)
+    #print('labels_list',labels_list)
     lengths = np.array([labels.shape[-1] for labels in labels_list])
-    print('lengths',lengths)
+    #print('lengths',lengths)
     long_range_mask = np.zeros((lengths.max(), lengths.max()))
-    print(long_range_mask.shape)
+    #print(long_range_mask.shape)
     long_range_mask[np.triu_indices(long_range_mask.shape[0], k=23)] = 1
-    print(long_range_mask.shape)
+    #print(long_range_mask.shape)
     # make it boolean
     long_range_mask = long_range_mask.astype(bool)
-    print(long_range_mask.shape)
-    print(len(labels_list))
+    #print(long_range_mask.shape)
+    #print(len(labels_list))
     for logits, labels in zip(logits_list, labels_list):
         labels = labels.squeeze().astype(float)
-        print(labels.shape)
+        #print(labels.shape)
         logits = logits.squeeze()
-        print(logits.shape)
+        #print(logits.shape)
         logits = (logits + logits.T) / 2 # symmetrize the logits, we only consider the upper triangle
-        print(logits.shape)
+        #print(logits.shape)
         predictions = scipy.special.expit(logits)
-        print(predictions.shape)
-        print('labels',labels)
-        print(long_range_mask.shape,labels.shape)
+        #print(predictions.shape)
+        #print('labels',labels)
+        #print(long_range_mask.shape,labels.shape)
         long_range_mask_tmp = long_range_mask[:labels.shape[-1], :labels.shape[-1]]
         # long range only
         long_range_labels = labels[long_range_mask_tmp].flatten()
@@ -189,19 +189,19 @@ def test(model, test_loader, accelerator):
 
             logits = model(data_dict)[:,1:-1,1:-1]
             labels = data_dict['struct']
-            print(labels.shape)
+            #print(labels.shape)
             label_mask = labels != -1
             outputs_list.append(logits.detach().cpu().numpy())#.reshape(-1,1))
             targets_list.append(labels.detach().cpu().numpy())#.reshape(-1,1))
-            print(logits.shape,labels.shape)
+            #print(logits.shape,labels.shape)
             #loss = criterion(logits[label_mask].reshape(-1,1), labels[label_mask].reshape(-1,1))
             #test_loss_list.append(loss.item())
         #logits = np.concatenate(outputs_list,axis = 0)
         #labels = np.concatenate(targets_list,axis = 0)
-    print('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
-    print(len(outputs_list))
+    #print('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
+    #print(len(outputs_list))
     metrics = calculate_metric_with_sklearn(outputs_list, targets_list)
-    print('yyyyyyyyyyyyyyyyyyyyyyyyyyyy')
+    #print('yyyyyyyyyyyyyyyyyyyyyyyyyyyy')
     print(f'\nTest: Top-l precision: {metrics["top_l_precision"]}, Top-l/2 precision: {metrics["top_l/2_precision"]}, Top-l/5 precision: {metrics["top_l/5_precision"]}, Top-l/10 precision: {metrics["top_l/10_precision"]}')
     return metrics
 
@@ -230,8 +230,8 @@ def main(args):
     #args.pdb_dir = f'{args.data_dir}/RNA_Secondary_Structure_Prediction/PDB_SS'
     #args.bprna_dir = f'{args.data_dir}/bpRNA'
 
-    ckpt_path = os.path.join(args.output_dir, name)
-    os.makedirs(ckpt_path, exist_ok=True)
+    # ckpt_path = os.path.join(args.output_dir, name)
+    # os.makedirs(ckpt_path, exist_ok=True)
 
     
     
@@ -306,7 +306,7 @@ def main(args):
     val_loss_list = []
     test_loss_list = []
     step = 0
-    best_val, best_test = 0, []
+    last_val, best_val, best_test = 0, 0, []
     patience = args.patience
     early_stop_flag = 0
     for epoch in range(args.num_epochs):
@@ -315,14 +315,14 @@ def main(args):
         for data_dict in tqdm(train_loader):
             with accelerator.accumulate(model):
                 logits = model(data_dict)[:,1:-1,1:-1]
-                print(logits.shape)
-                print
+                #print(logits.shape)
+                
                 labels = data_dict['struct']
-                print('label',labels.shape)
-                print('logits',logits.shape)
+                #print('label',labels.shape)
+                #print('logits',logits.shape)
                 label_mask = labels != -1 
                 loss = criterion(logits[label_mask].reshape(-1,1), labels[label_mask].reshape(-1,1))
- 
+                #print(loss)
                 accelerator.backward(loss)
                 optimizer.step()
                 optimizer.zero_grad()
@@ -366,6 +366,7 @@ def main(args):
             for i,data_test in enumerate(data_test_list):
                 test_metrics.append(test(model, test_dataloader_list[i], accelerator))
             best_test = test_metrics
+        if last_val < val_metrics["top_l_precision"]:
             early_stop_flag = 0 
         else:
             early_stop_flag +=1
@@ -373,26 +374,28 @@ def main(args):
         if early_stop_flag >= patience:
             print(f"Early stopping")
             break
+        last_val = val_metrics["top_l_precision"]
 
         end_time = time.time()
 
-        # if accelerator.is_main_process:
-        #     print(
-        #         f'epoch: {epoch}, lr: {optimizer.param_groups[0]["lr"]}, train_loss: {np.mean(train_loss_list):.6f}, time: {end_time - start_time:.2f}')
-        #     print(
-        #         f'[VL0] Loss: {np.mean(val_loss_list)}, Top-l precision: {val_metrics["top_l_precision"]}, Top-l/2 precision: {val_metrics["top_l/2_precision"]}, Top-l/5 precision: {val_metrics["top_l/5_precision"]}, Top-l/10 precision: {val_metrics["top_l/10_precision"]}')
-        #     print(
-        #         f'[TS0] loss: {np.mean(test_loss_list)}, Top-l precision: {test_metrics["top_l_precision"]}, Top-l/2 precision: {test_metrics["top_l/2_precision"]}, Top-l/5 precision: {test_metrics["top_l/5_precision"]}, Top-l/10 precision: {test_metrics["top_l/10_precision"]}')
-        #     log_dict = {'lr': optimizer.param_groups[0]["lr"], 'train_loss': np.mean(train_loss_list)}
-        #     log_dict.update({'VL0/loss': np.mean(val_loss_list), 'Top-l precision': {val_metrics["top_l_precision"]}, 'Top-l/2 precision': {val_metrics["top_l/2_precision"]}, 'Top-l/5 precision': {val_metrics["top_l/5_precision"]}, 'Top-l/10 precision': {val_metrics["top_l/10_precision"]}})
-        #     log_dict.update({'TS0/loss': np.mean(test_loss_list), 'Top-l precision': {test_metrics["top_l_precision"]}, 'Top-l/2 precision': {test_metrics["top_l/2_precision"]}, 'Top-l/5 precision': {test_metrics["top_l/5_precision"]}, 'Top-l/10 precision': {test_metrics["top_l/10_precision"]}})
-        #     wandb.log(log_dict)
+        if accelerator.is_main_process:
+            print(
+                f'epoch: {epoch}, lr: {optimizer.param_groups[0]["lr"]}, train_loss: {np.mean(train_loss_list):.6f}, time: {end_time - start_time:.2f}')
+            # print(
+            #     f'[VL0] Loss: {np.mean(val_loss_list)}, Top-l precision: {val_metrics["top_l_precision"]}, Top-l/2 precision: {val_metrics["top_l/2_precision"]}, Top-l/5 precision: {val_metrics["top_l/5_precision"]}, Top-l/10 precision: {val_metrics["top_l/10_precision"]}')
+            # print(
+            #     f'[TS0] loss: {np.mean(test_loss_list)}, Top-l precision: {test_metrics["top_l_precision"]}, Top-l/2 precision: {test_metrics["top_l/2_precision"]}, Top-l/5 precision: {test_metrics["top_l/5_precision"]}, Top-l/10 precision: {test_metrics["top_l/10_precision"]}')
+            log_dict = {'lr': optimizer.param_groups[0]["lr"], 'train_loss': np.mean(train_loss_list)}
+            log_dict.update(val_metrics)
+            for test_metrics in best_test:
+                log_dict.update(test_metrics)
+            wandb.log(log_dict)
         torch.cuda.empty_cache()
         train_loss_list, val_loss_list, test_loss_list = [], [], []
 
     
     for i,data_test in enumerate(data_test_list):
-        results_path = os.path.join(training_args.output_dir, "results", training_args.run_name)
+        results_path = os.path.join(args.output_dir, "results", args.run_name)
         os.makedirs(results_path, exist_ok=True)
         with open(os.path.join(results_path, f"{data_test}_results.json"), "w") as f:
             json.dump(best_test[i], f, indent=4)
@@ -430,7 +433,7 @@ if __name__ == "__main__":
     parser.add_argument('--data_train_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
     parser.add_argument('--data_val_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
     parser.add_argument('--data_test_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
-    
+    parser.add_argument('--attn_implementation', type=str, default="eager")
     args = parser.parse_args()
 
     assert args.mode in ['bprna', 'pdb']

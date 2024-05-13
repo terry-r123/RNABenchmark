@@ -124,7 +124,7 @@ def get_extractor(args):
         if args.train_from_scratch:
             print(f'Train from scratch {args.model_type} model')
             config = RNALMConfig.from_pretrained(args.model_name_or_path,
-            attn_implementation=training_args.attn_implementation,)
+            attn_implementation=args.attn_implementation,)
             extractor = RNALMModel(config)
         else:           
             extractor = RNALMModel.from_pretrained(

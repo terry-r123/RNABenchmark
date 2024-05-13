@@ -3,7 +3,7 @@
 gpu_device="0"
 master_port=41611
 nproc_per_node=1
-partition='ai4bio'
+partition='ai4multi'
 USE_SLURM='2'
 
 MODEL_TYPE='rnalm'
@@ -27,7 +27,7 @@ elif [ "$USE_SLURM" == "2" ]; then
     export LD_PRELOAD=/home/bingxing2/apps/compilers/gcc/12.2.0/lib64/libstdc++.so.6
     data_root=/home/bingxing2/ailab/group/ai4bio/public/
     home_root=/home/bingxing2/ailab/group/ai4bio/
-    EXEC_PREFIX="sbatch --nodes=1 -p ${quotatype} -A ${partition} --job-name=${MODEL_TYPE}_${task} --gres=gpu:$nproc_per_node --gpus=$nproc_per_node --cpus-per-task=32 accelerate launch --num_processes=$nproc_per_node --main_process_port=$master_port"
+    EXEC_PREFIX="sbatch --nodes=1 -p ${quotatype} -A ${partition} --job-name=${MODEL_TYPE}_${task} --gres=gpu:$nproc_per_node --cpus-per-task=32 accelerate launch --num_processes=$nproc_per_node --main_process_port=$master_port"
 else
     data_root=/mnt/data/oss_beijing/   
     EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device accelerate launch --num_processes=$nproc_per_node --main_process_port=$master_port"
@@ -38,17 +38,17 @@ DATA_PATH=${data_root}multi-omics/RNA/downstream/${task}/esm_data/bpRNA
 batch_size=1
 data=''
 
-for token in 'single' #'bpe' #'6mer' 'single' 'non-overlap' 
+for token in  '6mer' 'non-overlap' #'single' 'bpe'
 do
-    for pos in 'ape' #'alibi' 'rope'
+    for pos in 'ape' 'alibi' 'rope'
     do 
 
         MODEL_PATH=${home_root}renyuchen/RNABenchmark/model/rnalm/config/${MODEL_TYPE}-${token}-${pos}
         OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/baseline/${MODEL_TYPE}-${token}-${pos}-scratch
 
-        for seed in 42 #666 3407
+        for seed in 42 666 3407
         do
-            for lr in 5e-5 #1e-5 5e-4 1e-4 5e-6 1e-6
+            for lr in 5e-6 #5e-5 1e-5 5e-4 1e-4 5e-6 1e-6
             do 
                 echo ${MODEL_PATH}
 
@@ -58,7 +58,7 @@ do
                 --data_path  ${DATA_PATH}/${data} \
                 --model_name_or_path ${MODEL_PATH} \
                 --output_dir ${OUTPUT_PATH} \
-                --run_name ${MODEL_TYPE}_${data}_seed${seed}_${lr} \
+                --run_name ${MODEL_TYPE}_${data}_seed${seed}_lr${lr} \
                 --num_epochs 100 \
                 --per_device_train_batch_size ${batch_size} \
                 --per_device_eval_batch_size 1 \
@@ -68,6 +68,7 @@ do
                 --token_type ${token} \
                 --model_type ${MODEL_TYPE} \
                 --model_max_length 1026 \
+                --patience 50 \
                 --train_from_scratch True \
 
             done

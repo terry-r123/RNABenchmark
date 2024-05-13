@@ -23,7 +23,7 @@ import scipy
 from sklearn import metrics
 from sklearn.metrics import precision_score, recall_score, f1_score
 import random
-
+import json
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 def generate_kmer_str(sequence: str, k: int) -> str:
@@ -160,8 +160,8 @@ def main(args):
     #args.pdb_dir = f'{args.data_dir}/RNA_Secondary_Structure_Prediction/PDB_SS'
     #args.bprna_dir = f'{args.data_dir}/bpRNA'
 
-    ckpt_path = os.path.join(args.output_dir, name)
-    os.makedirs(ckpt_path, exist_ok=True)
+    # ckpt_path = os.path.join(args.output_dir, name)
+    # os.makedirs(ckpt_path, exist_ok=True)
 
     
     
@@ -196,6 +196,7 @@ def main(args):
     per_steps_one_epoch = len(
         train_dataset) // args.per_device_train_batch_size // accelerator.num_processes // args.gradient_accumulation_steps
     num_warmup_steps = per_steps_one_epoch * args.warmup_epos
+    print(num_warmup_steps,'!!!!!!!!!!!!!!!!!')
     num_training_steps = per_steps_one_epoch * args.num_epochs
 
     lr_scheduler = get_cosine_schedule_with_warmup(optimizer,
@@ -218,7 +219,7 @@ def main(args):
     val_loss_list = []
     test_loss_list = []
     step = 0
-    best_val, best_test = 0, []
+    last_val, best_val, best_test = 0, 0, {}
     patience = args.patience
     early_stop_flag = 0
     for epoch in range(args.num_epochs):
@@ -232,17 +233,17 @@ def main(args):
                 #print('logits',logits.shape)
                 label_mask = labels != -1 
                 loss = criterion(logits[label_mask].reshape(-1,1), labels[label_mask].reshape(-1,1))
- 
+                #print('loss',loss)
                 accelerator.backward(loss)
                 optimizer.step()
                 optimizer.zero_grad()
             
-
             if accelerator.sync_gradients:
                 lr_scheduler.step()
 
             gather_loss = accelerator.gather(loss.detach().float()).mean().item()
             train_loss_list.append(gather_loss)
+            
      
         val_auc_list, val_recall_list, val_precision_list, val_f1_list = [], [], [], []
         test_auc_list, test_recall_list, test_precision_list, test_f1_list = [], [], [], []
@@ -255,8 +256,9 @@ def main(args):
             best_val = val_metrics["f1"] 
             test_metrics = {}
             print(f"epoch {epoch}:")
-            test_metrics=test(model, test_dataloader_list[i], accelerator)
+            test_metrics=test(model, test_loader, accelerator)
             best_test = test_metrics
+        if last_val < val_metrics["f1"]:
             early_stop_flag = 0 
         else:
             early_stop_flag +=1
@@ -264,18 +266,27 @@ def main(args):
         if early_stop_flag >= patience:
             print(f"Early stopping")
             break
-
+        last_val = val_metrics["f1"] 
+        
         end_time = time.time()
-
+        if accelerator.is_main_process:
+            print(
+                f'epoch: {epoch}, lr: {optimizer.param_groups[0]["lr"]}, train_loss: {np.mean(train_loss_list):.6f}, time: {end_time - start_time:.2f}')
+           
+            log_dict = {'lr': optimizer.param_groups[0]["lr"], 'train_loss': np.mean(train_loss_list)}
+            log_dict.update(val_metrics)
+            
+            log_dict.update(best_test)
+            wandb.log(log_dict)
         torch.cuda.empty_cache()
         train_loss_list, val_loss_list, test_loss_list = [], [], []
 
     
     
-    results_path = os.path.join(training_args.output_dir, "results", training_args.run_name)
+    results_path = os.path.join(args.output_dir, "results", args.run_name)
     os.makedirs(results_path, exist_ok=True)
     with open(os.path.join(results_path, f"test_results.json"), "w") as f:
-        json.dump(best_test[i], f, indent=4)
+        json.dump(best_test, f, indent=4)
             
 
 
@@ -310,7 +321,7 @@ if __name__ == "__main__":
     parser.add_argument('--data_train_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
     parser.add_argument('--data_val_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
     parser.add_argument('--data_test_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
-    
+    parser.add_argument('--attn_implementation', type=str, default="eager")
     args = parser.parse_args()
 
     assert args.mode in ['bprna', 'pdb']
