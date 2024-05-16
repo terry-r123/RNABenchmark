@@ -8,8 +8,10 @@ from typing import Optional, Dict, Sequence, Tuple, List
 
 import torch
 import random
-import transformers
 import sklearn
+import scipy
+import transformers
+
 import numpy as np
 from torch.utils.data import Dataset
 import pdb
@@ -18,34 +20,39 @@ import pdb
 os.environ["WANDB_DISABLED"] = "true"
 
 
-#import IA3_lora
 from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel, EarlyStoppingCallback
-# import sys
-# sys.path.append("..") 
+import sys
+current_path = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_path)
+sys.path.append(parent_dir)
 
-from model.rnalm.modeling_rnalm import BertForSequenceClassification
+from model.rnalm.modeling_rnalm import RNALMForSequenceClassification
 from model.rnalm.rnalm_config import RNALMConfig
 from model.esm.modeling_esm import EsmForSequenceClassification
 from model.esm.esm_config import EsmConfig
-from model.rnabert.modeling_rnabert import RnaBertForSequenceClassification
+from model.rnafm.modeling_rnafm import RnaFmForSequenceClassification
+from tokenizer.tokenization_opensource import OpenRnaLMTokenizer
+#from model.rnabert.modeling_rnabert import RnaBertForSequenceClassification
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
     model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
-    apply_lora: bool = field(default=False, metadata={"help": "whether to use LoRA"})
-    apply_ia3: bool = field(default=False, metadata={"help": "whether to use LoRA"})
+    use_lora: bool = field(default=False, metadata={"help": "whether to use LoRA"})
+    use_alibi: bool = field(default=True, metadata={"help": "whether to use alibi"})
+    use_features: bool = field(default=True, metadata={"help": "whether to use alibi"})
     lora_r: int = field(default=8, metadata={"help": "hidden dimension for LoRA"})
-    lora_init_scale: float = field(default=0.01, metadata={"help": "dropout rate for LoRA"})
     lora_alpha: int = field(default=32, metadata={"help": "alpha for LoRA"})
     lora_dropout: float = field(default=0.05, metadata={"help": "dropout rate for LoRA"})
     lora_target_modules: str = field(default="query,value", metadata={"help": "where to perform LoRA"})
-    use_alibi: bool = field(default=True, metadata={"help": "whether to use alibi"})
+    tokenizer_name_or_path: Optional[str] = field(default="zhihan1996/DNABERT-2-117M")
 
 @dataclass
 class DataArguments:
     data_path: str = field(default=None, metadata={"help": "Path to the training data."})
     kmer: int = field(default=-1, metadata={"help": "k-mer for input sequence. -1 means not using k-mer."})
-
+    data_train_path: str = field(default=None, metadata={"help": "Path to the training data."})
+    data_val_path: str = field(default=None, metadata={"help": "Path to the training data."})
+    data_test_path: str = field(default=None, metadata={"help": "Path to the test data. is list"})
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
@@ -81,6 +88,7 @@ class TrainingArguments(transformers.TrainingArguments):
     token_type: str = field(default='6mer')
     train_from_scratch: bool = field(default=False)
     log_dir: str = field(default="output")
+    attn_implementation: str = field(default="eager")
 
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
     """Collects the state dict and dump to disk."""
@@ -137,7 +145,7 @@ class SupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
     def __init__(self, 
-                 data_path: str, 
+                 data_path: str, args,
                  tokenizer: transformers.PreTrainedTokenizer, 
                  kmer: int = -1):
 
@@ -198,14 +206,12 @@ class SupervisedDataset(Dataset):
 class DataCollatorForSupervisedDataset(object):
     """Collate examples for supervised fine-tuning."""
 
-    tokenizer: transformers.PreTrainedTokenizer
+    def __init__(self, tokenizer: transformers.PreTrainedTokenizer, args):
+        self.tokenizer = tokenizer
+        self.args = args
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        # input_ids, labels = tuple([instance[key] for instance in instances] for key in ("input_ids", "labels"))
-        # #print('1',input_ids[0].shape)
-        # input_ids = torch.nn.utils.rnn.pad_sequence(
-        #     input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
-        # )
+        
         seqs, labels = tuple([instance[key] for instance in instances] for key in ("input_ids", "labels"))
         
         output = self.tokenizer(seqs, padding='longest', max_length=self.tokenizer.model_max_length, truncation=True, return_tensors='pt')
@@ -251,45 +257,24 @@ def train():
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     set_seed(training_args)
     # load tokenizer
-    if training_args.model_type == 'esm-open':
-        tokenizer = EsmTokenizer.from_pretrained("/mnt/data/ai4bio/renyuchen/DNABERT/examples/rna_finetune/ssp/vocab_esm_mars.txt")
-    elif training_args.model_type == 'rnabert':
+    if training_args.model_type == 'rnalm':
         tokenizer = EsmTokenizer.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
             model_max_length=training_args.model_max_length,
             padding_side="right",
             use_fast=True,
-            # trust_remote_code=True,
+            trust_remote_code=True,
         )
-        # print(tokenizer,len(tokenizer))
-        # vocab = tokenizer.get_vocab()  # 或者直接访问 tokenizer.vocab（如果存在）
-
-        # # 打印词表的token及其索引
-        # for token, index in vocab.items():
-        #     print(f"{token}: {index}")
-
-        # # 打印词表大小
-        # print(f"Total number of tokens in vocabulary: {len(vocab)}")
-        # tokens = ['<cls>','A', 'A', 'G', 'A', 'A', 'T', 'C', 'A','<sep>']
-        # token_ids = tokenizer.convert_tokens_to_ids(tokens)
-
-        # print(token_ids)
-        # # special_tokens_dict = {
-        # #     'additional_special_tokens': ['<cls>', '<eos>', '<unk>']
-        # # }
-
-        # # # 添加特殊token
-        # # num_added_toks = tokenizer.add_special_tokens(special_tokens_dict)
-        # print(tokenizer,len(tokenizer))
-        # vocab = tokenizer.get_vocab()  # 或者直接访问 tokenizer.vocab（如果存在）
-
-        # # 打印词表的token及其索引
-        # for token, index in vocab.items():
-        #     print(f"{token}: {index}")
-
-        # # 打印词表大小
-        # print(f"Total number of tokens in vocabulary: {len(vocab)}")
+    elif training_args.model_type == 'rna-fm':
+        tokenizer = OpenRnaLMTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=True,
+            trust_remote_code=True,
+        )
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
@@ -297,59 +282,52 @@ def train():
             model_max_length=training_args.model_max_length,
             padding_side="right",
             use_fast=True,
-            # trust_remote_code=True,
+            trust_remote_code=True,
         )
 
-    
-    # token_test = "ATCGGCAGTACAGCGATTTGACGAT"
-    # print(token_test)
-    # print(tokenizer.tokenize(token_test))
-    # print(tokenizer(token_test))
+
     if "InstaDeepAI" in model_args.model_name_or_path:
         tokenizer.eos_token = tokenizer.pad_token
     if 'mer' in training_args.token_type:
         data_args.kmer=int(training_args.token_type[0])
     # define datasets and data collator
-    train_dataset = SupervisedDataset(tokenizer=tokenizer, 
-                                      data_path=os.path.join(data_args.data_path, "train.csv"), 
+    train_dataset = SupervisedDataset(tokenizer=tokenizer, args=training_args,
+                                     data_path=os.path.join(data_args.data_path, data_args.data_train_path), 
                                       kmer=data_args.kmer)
-    val_dataset = SupervisedDataset(tokenizer=tokenizer, 
-                                     data_path=os.path.join(data_args.data_path, "val.csv"), 
+    val_dataset = SupervisedDataset(tokenizer=tokenizer, args=training_args,
+                                     data_path=os.path.join(data_args.data_path, data_args.data_val_path), 
                                      kmer=data_args.kmer)
-    test_dataset = SupervisedDataset(tokenizer=tokenizer, 
-                                     data_path=os.path.join(data_args.data_path, "test.csv"), 
+    test_dataset = SupervisedDataset(tokenizer=tokenizer, args=training_args,
+                                     data_path=os.path.join(data_args.data_path, data_args.data_test_path), 
                                      kmer=data_args.kmer)
-    print(f'# train: {len(train_dataset)},val:{len(val_dataset)},test:{len(test_dataset)}')
-    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
+    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer,args=training_args)
     print(f'# train: {len(train_dataset)},val:{len(val_dataset)},test:{len(test_dataset)}')
 
     # load model
-    print(training_args.model_type)
-    if training_args.model_type=='mmoe':
-        config = MMoeBertConfig.from_pretrained(model_args.model_name_or_path,
-        num_labels=train_dataset.num_labels)
-        config.stage = training_args.stage
-        print(config)
-        model = MMoeBertForSequenceClassification.from_pretrained(
-        model_args.model_name_or_path,
-        config = config,
-        cache_dir=training_args.cache_dir,
-        #num_labels = train_dataset.num_labels,
-        )
-        if config.stage == '1':
-            for name, param in model.named_parameters():
-                for key in ["rna_expert", "rna_embeddings","rna_pooler", "rna_LayerNorm"]:
-                    if key in name:
-                        param.requires_grad = False  
-                        break        
-        elif config.stage == '2':
-            for param in model.parameters():
-                param.requires_grad = False
-            for name, param in model.named_parameters():
-                for key in ["rna_expert", "rna_embeddings","rna_pooler", "rna_LayerNorm","classifier","attention"]:
-                    if key in name:
-                        #pdb.set_trace()
-                        param.requires_grad = True
+    if training_args.model_type == 'rnalm':
+        if training_args.train_from_scratch:
+            print('Train from scratch')
+            config = RNALMConfig.from_pretrained(model_args.model_name_or_path,
+                num_labels=train_dataset.num_labels,
+                token_type=training_args.token_type,
+                problem_type="single_label_classification",
+                attn_implementation=training_args.attn_implementation,
+                )
+            print(config)
+            model =  RNALMForSequenceClassification(
+                config,
+                )
+        else:
+            print('Loading rnalm model')
+            print(train_dataset.num_labels)
+            model =  RNALMForSequenceClassification.from_pretrained(
+                model_args.model_name_or_path,
+                #config = config,
+                cache_dir=training_args.cache_dir,
+                num_labels=train_dataset.num_labels,
+                #trust_remote_code=True,
+                token_type=training_args.token_type,
+                )
     elif training_args.model_type == 'dnabert2':
 
         if training_args.train_from_scratch:
@@ -365,44 +343,33 @@ def train():
                 use_alibi=model_args.use_alibi,
                 
             )
-    elif training_args.model_type == 'rnalm':
-            if training_args.train_from_scratch:
-                
-                print('Train from scratch')
-                config = RNALMConfig.from_pretrained(model_args.model_name_or_path,
-                    num_labels=train_dataset.num_labels)
-                model = BertForSequenceClassification(
-                    config
-                    )
-            else:
-                print('Loading rnalm model')
-                print(train_dataset.num_labels)
-
-                model = BertForSequenceClassification.from_pretrained(
-                    model_args.model_name_or_path,
-                    #config = config,
-                    cache_dir=training_args.cache_dir,
-                    num_labels=train_dataset.num_labels,
-                    #trust_remote_code=True,
-                    )
-    elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm-rna':
-        if training_args.train_from_scratch:
-            print(f'Loading {training_args.model_type} model')
-            print('Train from scratch')
-            config = AutoConfig.from_pretrained(model_args.model_name_or_path,
-                num_labels=train_dataset.num_labels)
-            model = transformers.AutoModelForSequenceClassification.from_config(
-                config
-                )
-        else:
-            print(training_args.model_type)
-            print(f'Loading {training_args.model_type} model')
-            model = EsmForSequenceClassification.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                num_labels=train_dataset.num_labels,
-                trust_remote_code=True,
-            )        
+    # elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm-rna':
+    #     if training_args.train_from_scratch:
+    #         print(f'Loading {training_args.model_type} model')
+    #         print('Train from scratch')
+    #         config = AutoConfig.from_pretrained(model_args.model_name_or_path,
+    #             num_labels=train_dataset.num_labels)
+    #         model = transformers.AutoModelForSequenceClassification.from_config(
+    #             config
+    #             )
+    #     else:
+    #         print(training_args.model_type)
+    #         print(f'Loading {training_args.model_type} model')
+    #         model = EsmForSequenceClassification.from_pretrained(
+    #             model_args.model_name_or_path,
+    #             cache_dir=training_args.cache_dir,
+    #             num_labels=train_dataset.num_labels,
+    #             trust_remote_code=True,
+    #         )        
+    elif training_args.model_type == 'rna-fm':      
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = RnaFmForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            trust_remote_code=True,
+        )        
     elif training_args.model_type == 'rnabert':
         print(training_args.model_type)
         print(f'Loading {training_args.model_type} model')
@@ -437,29 +404,7 @@ def train():
                 num_labels=train_dataset.num_labels,
                 trust_remote_code=True,
             )
-    #print(model_args,training_args)
-    # configure LoRA
-    if model_args.apply_lora:
-        lora_config = LoraConfig(
-            r=model_args.lora_r,
-            lora_alpha=model_args.lora_alpha,
-            target_modules=list(model_args.lora_target_modules.split(",")),
-            lora_dropout=model_args.lora_dropout,
-            bias="none",
-            task_type="SEQ_CLS",
-            inference_mode=False,
-        )
-        model = get_peft_model(model, lora_config)
-        #model.print_trainable_parameters()
 
-    # if model_args.apply_ia3:
-    #     peft_config = IA3_lora.LoRAConfig(lora_rank=model_args.lora_r, lora_init_scale=model_args.lora_init_scale)
-    #     model = IA3_lora.modify_with_lora(model, peft_config)
-    if 'mmoe' in model_args.model_name_or_path:
-        if torch.distributed.get_rank() in [0, -1]:
-            for name, param in model.named_parameters():
-                print(name, param.requires_grad)
-            print(get_parameter_number(model))
 
     # define trainer
     trainer = transformers.Trainer(model=model,
@@ -475,7 +420,7 @@ def train():
 
     if training_args.save_model:
         trainer.save_state()
-        safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
+        #safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
 
     # get the evaluation results from trainer
     if training_args.eval_and_save_results:
@@ -484,7 +429,7 @@ def train():
         print("on the test set:", results, "\n", results_path)
         os.makedirs(results_path, exist_ok=True)
         with open(os.path.join(results_path, "test_results.json"), "w") as f:
-            json.dump(results, f)
+            json.dump(results, f, indent=4)
          
 
 

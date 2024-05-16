@@ -91,7 +91,7 @@ class TrainingArguments(transformers.TrainingArguments):
     token_type: str = field(default='6mer')
     train_from_scratch: bool = field(default=False)
     log_dir: str = field(default="output")
-    
+    attn_implementation: str = field(default="eager")
 def set_seed(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -330,7 +330,7 @@ def train():
             use_fast=True,
             trust_remote_code=True,
         )
-    if training_args.model_type == 'hyenadna':
+    elif training_args.model_type == 'hyenadna':
         tokenizer = HyenaDNATokenizer.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
@@ -376,7 +376,7 @@ def train():
     #                                 data_path=os.path.join(data_path, "holdout_SNHG6.csv"))
     # holdout_WHAMMP2 = SupervisedDataset(tokenizer=tokenizer,
     #                                 data_path=os.path.join(data_path, "holdout_WHAMMP2.csv"))
-    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer,args=training_args)
+    #data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer,args=training_args)
     print(f'# train: {len(train_dataset)},val:{len(val_dataset)}')#,test:{len(test_dataset)}')
 
     # load model
@@ -387,12 +387,12 @@ def train():
                 num_labels=train_dataset.num_labels,
                 problem_type="regression",
                 token_type=training_args.token_type,
-                use_flash_att = False,
+                attn_implementation=training_args.attn_implementation,
                 )
             print(config)
             model =  RNALMForSequenceClassification(
                 config,
-                problem_type="regression",
+               
                 )
         else:
             print('Loading rnalm model')

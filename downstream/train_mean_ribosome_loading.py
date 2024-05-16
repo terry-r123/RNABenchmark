@@ -11,9 +11,10 @@ import random
 from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel, EarlyStoppingCallback
 
 import torch
-import transformers
 import sklearn
 import scipy
+import transformers
+
 import numpy as np
 import re
 from torch.utils.data import Dataset
@@ -34,6 +35,8 @@ from model.dnabert1.dnabert_layer import DNABertForSequenceClassification as DNA
 from model.ntv2.modeling_esm import EsmForSequenceClassification as NTv2ForSequenceClassification
 from model.hyenadna.tokenization_hyena import HyenaDNATokenizer
 from model.hyenadna.modeling_hyena import HyenaDNAForSequenceClassification
+from model.rnafm.modeling_rnafm import RnaFmForSequenceClassification
+from tokenizer.tokenization_opensource import OpenRnaLMTokenizer
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
@@ -92,7 +95,7 @@ class TrainingArguments(transformers.TrainingArguments):
     token_type: str = field(default='6mer')
     train_from_scratch: bool = field(default=False)
     log_dir: str = field(default="output")
-    
+    attn_implementation: str = field(default="eager")
 def set_seed(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -314,7 +317,16 @@ def train():
             use_fast=True,
             trust_remote_code=True,
         )
-    if training_args.model_type == 'hyenadna':
+    elif training_args.model_type == 'rna-fm':
+        tokenizer = OpenRnaLMTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=True,
+            trust_remote_code=True,
+        )
+    elif training_args.model_type == 'hyenadna':
         tokenizer = HyenaDNATokenizer.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
@@ -364,7 +376,7 @@ def train():
                 num_labels=train_dataset.num_labels,
                 problem_type="regression",
                 token_type=training_args.token_type,
-                use_flash_att = False,
+                attn_implementation=training_args.attn_implementation,
                 )
             print(config)
             model =  RNALMForSequenceClassification(
@@ -382,25 +394,35 @@ def train():
                 problem_type="regression",
                 token_type=training_args.token_type,
                 )
-    elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm':
-        if training_args.train_from_scratch:
-            print('Loading esm model')
-            print('Train from scratch')
-            config = AutoConfig.from_pretrained(model_args.model_name_or_path,
-                num_labels=train_dataset.num_labels)
-            model = transformers.AutoModelForSequenceClassification.from_config(
-                config
-                )
-        else:
-            print(training_args.model_type)
-            print(f'Loading {training_args.model_type} model')
-            model = EsmForSequenceClassification.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                num_labels=train_dataset.num_labels,
-                problem_type="regression",
-                trust_remote_code=True,
-            )        
+    elif training_args.model_type == 'rna-fm':      
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = RnaFmForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            trust_remote_code=True,
+            problem_type="regression",
+        )     
+    # elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm':
+    #     if training_args.train_from_scratch:
+    #         print('Loading esm model')
+    #         print('Train from scratch')
+    #         config = AutoConfig.from_pretrained(model_args.model_name_or_path,
+    #             num_labels=train_dataset.num_labels)
+    #         model = transformers.AutoModelForSequenceClassification.from_config(
+    #             config
+    #             )
+    #     else:
+    #         print(training_args.model_type)
+    #         print(f'Loading {training_args.model_type} model')
+    #         model = EsmForSequenceClassification.from_pretrained(
+    #             model_args.model_name_or_path,
+    #             cache_dir=training_args.cache_dir,
+    #             num_labels=train_dataset.num_labels,
+    #             problem_type="regression",
+    #             trust_remote_code=True,
+    #         )        
     elif training_args.model_type == 'hyenadna':
         if training_args.train_from_scratch:
             pass
@@ -487,14 +509,10 @@ def train():
         os.makedirs(results_path, exist_ok=True)
         results_test = trainer.evaluate(eval_dataset=test_dataset)
         with open(os.path.join(results_path, "test_results.json"), "w") as f:
-            for key, value in results_test.items():
-                result_line = json.dumps({key: value})
-                f.write(result_line + "\n")
+            json.dump(results_test, f, indent=4)
         results_val = trainer.evaluate(eval_dataset=val_dataset)
         with open(os.path.join(results_path, "val_results.json"), "w") as f:
-            for key, value in results_val.items():
-                result_line = json.dumps({key: value})
-                f.write(result_line + "\n")
+            json.dump(results_val, f, indent=4)
 
 
 if __name__ == "__main__":

@@ -1,40 +1,54 @@
 #!/bin/bash
+gpu_device="2"
 
-gpu_device="1"
-master_port=42259
 nproc_per_node=1
 partition='ai4bio'
-USE_SLURM='0'
+USE_SLURM='2'
 
-# 根据 USE_SLURM 调整环境变量和执行前缀
+MODEL_TYPE='rnalm'
+
+task='StructuralScoreImputation'
+
 if [ "$USE_SLURM" == "1" ]; then
     EXEC_PREFIX="srun --job-name=${MODEL_TYPE}_${data} --gres=gpu:$nproc_per_node --cpus-per-task=$(($nproc_per_node * 5)) --mem=50G"
 elif [ "$USE_SLURM" == "2" ]; then
-
-    EXEC_PREFIX="srun --job-name=${MODEL_TYPE}_alt_${data} --gres=gpu:2 --cpus-per-task=10 --mem=100G --qos=highpriority"
+    quotatype='vip_gpu_ailab'
+    module load anaconda/2021.11
+    module load cuda/11.7.0
+    module load cudnn/8.6.0.163_cuda11.x
+    module load compilers/gcc/9.3.0
+    module load llvm/triton-clang_llvm-11.0.1
+    source activate dnalm_v2
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${HOME}/peng_tmp_test/miniconda3/lib
+    export CPATH=/usr/include:$CPATH
+    export PYTHONUNBUFFERED=1
+    export LD_PRELOAD=/home/bingxing2/apps/compilers/gcc/12.2.0/lib64/libstdc++.so.6
+    data_root=/home/bingxing2/ailab/group/ai4bio/public/
+    home_root=/home/bingxing2/ailab/group/ai4bio/
+    
 else
     data_root=/mnt/data/oss_beijing/   
-    EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
+    EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --num_processes=$nproc_per_node --main_process_port=$master_port"
 fi
 
-# 基础环境设置
-MODEL_TYPE='rnalm'
-task='StructuralScoreImputation'
-for token in 'single' '6mer' 'bpe' 'non-overlap' 
-do
-    for pos in 'ape' 'alibi' 'rope'
-    do 
+DATA_PATH=${data_root}multi-omics/RNA/downstream/${task}
+batch_size=32
+data=''
 
-        MODEL_PATH=/mnt/data/ai4bio/renyuchen/RNABenchmark/model/rnalm/config/${MODEL_TYPE}-${token}-${pos}
-        DATA_PATH=${data_root}multi-omics/RNA/downstream/${task}
-        OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/baseline/${MODEL_TYPE}-${token}-${pos}-scratch
-        batch_size=32
-        CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1
-        data=''
-        data_file_train=train.csv; data_file_val=val.csv; data_file_test=test.csv
+for token in 'single' #'6mer' 'bpe' 'non-overlap' 
+do
+    for pos in 'rope'
+    do 
+        
         for seed in 42 666 3407
         do
 
+            data_file_train=train.csv; data_file_val=val.csv; data_file_test=test.csv
+            MODEL_PATH=${home_root}renyuchen/RNABenchmark/model/rnalm/config/${MODEL_TYPE}-${token}-${pos}
+            OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/baseline/${MODEL_TYPE}-${token}-${pos}-scratch     
+            master_port=$(shuf -i 10000-45000 -n 1)
+            echo "Using port $master_port for communication."
+            EXEC_PREFIX="sbatch --nodes=1 -p ${quotatype} -A ${partition} --job-name=${MODEL_TYPE}_${task}  --gres=gpu:$nproc_per_node --cpus-per-task=32 torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"           
             echo ${MODEL_PATH}
 
             ${EXEC_PREFIX} \
@@ -42,7 +56,7 @@ do
                     --model_name_or_path ${MODEL_PATH} \
                     --data_path  ${DATA_PATH}/${data} \
                     --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
-                    --run_name ${MODEL_TYPE}_${data}_seed${seed} \
+                    --run_name ${MODEL_TYPE}_${data}_seed${seed}_lr${lr} \
                     --model_max_length 512 \
                     --per_device_train_batch_size ${batch_size} \
                     --per_device_eval_batch_size 32 \

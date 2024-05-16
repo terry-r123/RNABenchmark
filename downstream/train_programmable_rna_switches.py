@@ -12,9 +12,9 @@ from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer,
 
 
 import torch
-import transformers
 import sklearn
 import scipy
+import transformers
 import numpy as np
 import re
 from torch.utils.data import Dataset
@@ -91,6 +91,7 @@ class TrainingArguments(transformers.TrainingArguments):
     token_type: str = field(default='6mer')
     train_from_scratch: bool = field(default=False)
     log_dir: str = field(default="output")
+    attn_implementation: str = field(default="eager")
 
 def set_seed(args):
     random.seed(args.seed)
@@ -386,12 +387,11 @@ def train():
                 num_labels=train_dataset.num_labels,
                 problem_type="regression",
                 token_type=training_args.token_type,
-                use_flash_att = False,
+                attn_implementation=training_args.attn_implementation,
                 )
             print(config)
             model =  RNALMForSequenceClassification(
                 config,
-                problem_type="regression",
                 )
         else:
             print('Loading rnalm model')
@@ -509,9 +509,7 @@ def train():
         os.makedirs(results_path, exist_ok=True)
         results_test = trainer.evaluate(eval_dataset=test_dataset)
         with open(os.path.join(results_path, "test_results.json"), "w") as f:
-            for key, value in results_test.items():
-                result_line = json.dumps({key: value})
-                f.write(result_line + "\n")
+            json.dump(results_test, f, indent=4)
         
 
 

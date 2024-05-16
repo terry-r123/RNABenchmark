@@ -39,38 +39,40 @@ batch_size=1
 data=''
 data_file_train=train.csv; data_file_val=val.csv; data_file_test=test,RFAM19,DIRECT
 
-for token in 'single' 'bpe' #'non-overlap' '6mer' 
+for token in 'single' #'bpe' #'non-overlap' '6mer' 
 do
-    for pos in 'ape' 'alibi' 'rope'
+    for pos in 'ape' #'alibi' 'rope'
     do 
 
         MODEL_PATH=${home_root}renyuchen/RNABenchmark/model/rnalm/config/${MODEL_TYPE}-${token}-${pos}
         OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/baseline/${MODEL_TYPE}-${token}-${pos}-scratch
 
-        for seed in 42 666 3407
+        for seed in 666 #3407
         do
+            for lr in 5e-5 1e-5 5e-4 5e-6 
+            do 
+                echo ${MODEL_PATH}
 
-            echo ${MODEL_PATH}
+                ${EXEC_PREFIX} \
+                downstream/train_distance_map.py \
+                --mode bprna \
+                --data_path  ${DATA_PATH}/${data} \
+                --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
+                --model_name_or_path ${MODEL_PATH} \
+                --output_dir ${OUTPUT_PATH} \
+                --run_name ${MODEL_TYPE}_${data}_seed${seed}_lr${lr} \
+                --num_epochs 100 \
+                --per_device_train_batch_size ${batch_size} \
+                --per_device_eval_batch_size 1 \
+                --gradient_accumulation_steps 8 \
+                --lr ${lr} \
+                --num_workers 1 \
+                --token_type ${token} \
+                --model_type ${MODEL_TYPE} \
+                --model_max_length 1026 \
+                --train_from_scratch True \
 
-            ${EXEC_PREFIX} \
-            downstream/train_distance_map.py \
-            --mode bprna \
-            --data_path  ${DATA_PATH}/${data} \
-            --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
-            --model_name_or_path ${MODEL_PATH} \
-            --output_dir ${OUTPUT_PATH} \
-            --run_name ${MODEL_TYPE}_${data}_seed${seed} \
-            --num_epochs 100 \
-            --per_device_train_batch_size ${batch_size} \
-            --per_device_eval_batch_size 1 \
-            --gradient_accumulation_steps 8 \
-            --lr 3e-5 \
-            --num_workers 1 \
-            --token_type ${token} \
-            --model_type ${MODEL_TYPE} \
-            --model_max_length 1026 \
-            --train_from_scratch True \
-
+            done
         done
     done
 done
