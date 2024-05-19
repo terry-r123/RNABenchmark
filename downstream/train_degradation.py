@@ -30,11 +30,13 @@ sys.path.append(parent_dir)
 from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel, EarlyStoppingCallback
 from model.rnalm.modeling_rnalm import RNALMForNucleotideLevel
 from model.rnalm.rnalm_config import RNALMConfig
-
-#from hyena_dna.standalone_hyenadna import HyenaForRNADegraPre, CharacterTokenizer
-# from model.esm.modeling_esm import ESMForSequenceRNAdegra
-# from model.esm.esm_config import EsmConfig
-#from model.dnabert2_source.bert_layers import BertForSequenceRNAdegra as DNABERT2ForRNAdegra
+from model.rnafm.modeling_rnafm import RnaFmForNucleotideLevel
+from model.rnabert.modeling_rnabert import RnaBertForNucleotideLevel
+from model.rnamsm.modeling_rnamsm import RnaMsmForNucleotideLevel
+from model.splicebert.modeling_splicebert import SpliceBertForNucleotideLevel
+from model.utrbert.modeling_utrbert import UtrBertForNucleotideLevel
+from model.utrlm.modeling_utrlm import UtrLmForNucleotideLevel
+from tokenizer.tokenization_opensource import OpenRnaLMTokenizer
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
@@ -93,7 +95,7 @@ class TrainingArguments(transformers.TrainingArguments):
     token_type: str = field(default='6mer')
     train_from_scratch: bool = field(default=False)
     log_dir: str = field(default="output")
-
+    attn_implementation: str = field(default="eager")
 
 
 
@@ -252,14 +254,13 @@ class SupervisedDataset(Dataset):
         self.texts =texts
         #make sure the length of sequences in the dataset is the same
         self.weight_mask = torch.ones((self.input_ids.shape[0],seq_length+2))
-        #print('------------------',self.weight_mask.shape)
 
         self.attention_mask = output["attention_mask"]
         #print(self.attention_mask[0])
-        if args.token_type == '6mer':
-            for i in range(1,5):
+        if 'mer' in args.token_type:
+            for i in range(1,kmer-1):
                 self.weight_mask[:,i+1]=self.weight_mask[:,-i-2]=1/(i+1) 
-            self.weight_mask[:, 6:-6] = 1/6
+            self.weight_mask[:, kmer:-kmer] = 1/kmer
         self.post_token_length = torch.zeros(self.attention_mask.shape)
         if args.token_type == 'bpe' or args.token_type == 'non-overlap':
             self.post_token_length = bpe_position(self.texts,self.attention_mask,tokenizer)
@@ -391,16 +392,17 @@ def train():
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     set_seed(training_args)
     # load tokenizer
-    
-    if training_args.model_type == 'hyena':
-        tokenizer = CharacterTokenizer(
-            characters=['A', 'C', 'G', 'T', 'N'],  # add DNA characters, N is uncertain
-            model_max_length=training_args.model_max_length + 2,  # to account for special tokens, like EOS
-            add_special_tokens=False,  # we handle special tokens elsewhere
-            padding_side='left', # since HyenaDNA is causal, we pad on the left
-        )
-    elif training_args.model_type == 'rnalm':
+    if training_args.model_type == 'rnalm':
         tokenizer = EsmTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=True,
+            trust_remote_code=True,
+        )
+    elif training_args.model_type in ['rna-fm','rnabert','rnamsm','splicebert-human510','splicebert-ms510','splicebert-ms1024','utrbert-3mer','utrbert-4mer','utrbert-5mer','utrbert-6mer','utr-lm-mrl','utr-lm-te-el']:
+        tokenizer = OpenRnaLMTokenizer.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
             model_max_length=training_args.model_max_length,
@@ -441,7 +443,7 @@ def train():
                 num_labels=train_dataset.num_labels,
                 problem_type="regression",
                 token_type=training_args.token_type,
-                use_flash_att = False,
+                attn_implementation=training_args.attn_implementation,
                 
                 )
             print(config)
@@ -462,26 +464,78 @@ def train():
                 token_type=training_args.token_type,
                 )
             
-    elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm-rna':
-        if training_args.train_from_scratch:
-            print(f'Loading {training_args.model_type} model')
-            print('Train from scratch')
-            config = AutoConfig.from_pretrained(model_args.model_name_or_path,
-                num_labels=train_dataset.num_labels)
-            model = ESMForSequenceRNAdegra(
-                config
-                )
-        else:
-            print(training_args.model_type)
-            print(f'Loading {training_args.model_type} model')
-            model = ESMForSequenceRNAdegra.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                num_labels=train_dataset.num_labels,
-                problem_type="regression",
-                token_type=training_args.token_type,
-                trust_remote_code=True,
-            )        
+    elif training_args.model_type == 'rna-fm':      
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = RnaFmForNucleotideLevel.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            trust_remote_code=True,
+            problem_type="regression",
+            token_type=training_args.token_type,
+            tokenizer=tokenizer,
+        )     
+    elif training_args.model_type == 'rnabert':      
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = RnaBertForNucleotideLevel.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            trust_remote_code=True,
+            problem_type="regression",
+            token_type=training_args.token_type,
+            tokenizer=tokenizer,
+        )     
+    elif training_args.model_type == 'rnamsm':
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = RnaMsmForNucleotideLevel.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            trust_remote_code=True,
+            problem_type="regression",
+            token_type=training_args.token_type,
+            tokenizer=tokenizer,
+        )        
+    elif 'splicebert' in training_args.model_type:
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = SpliceBertForNucleotideLevel.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            trust_remote_code=True,
+            problem_type="regression",
+            token_type=training_args.token_type,
+            tokenizer=tokenizer,
+        )       
+    elif 'utrbert' in training_args.model_type:
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = UtrBertForNucleotideLevel.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            trust_remote_code=True,
+            problem_type="regression",
+            token_type=training_args.token_type,
+            tokenizer=tokenizer,
+        )  
+    elif 'utr-lm' in training_args.model_type:
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = UtrLmForNucleotideLevel.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            trust_remote_code=True,
+            problem_type="regression",
+            token_type=training_args.token_type,
+            tokenizer=tokenizer,
+        )     
    
     elif training_args.model_type == 'dnabert2':
         if training_args.train_from_scratch:
@@ -499,23 +553,7 @@ def train():
                 token_type=training_args.token_type,
                 tokenizer=tokenizer,
             )
-    elif training_args.model_type == 'hyena':
-        backbone_cfg = None
-        if training_args.train_from_scratch:
-            pass
-        else:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            print("Using device:", device)
-            model = HyenaForRNADegraPre.from_pretrained(
-                model_args.model_name_or_path,
-                #download=True,
-                config=backbone_cfg,
-                device=device,
-                use_head=False,
-                n_classes=train_dataset.num_labels,
-                problem_type="regression",
-                #token_type=training_args.token_type,
-            )
+    
 
     trainer = transformers.Trainer(model=model,
                                    tokenizer=tokenizer,

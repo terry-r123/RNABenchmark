@@ -27,7 +27,13 @@ sys.path.append(parent_dir)
 from model.rnalm.modeling_rnalm import RNALMForSequenceClassification
 from model.rnalm.rnalm_config import RNALMConfig
 from model.esm.modeling_esm import EsmForSequenceClassification
-
+from model.rnafm.modeling_rnafm import RnaFmForSequenceClassification
+from model.rnabert.modeling_rnabert import RnaBertForSequenceClassification
+from model.rnamsm.modeling_rnamsm import RnaMsmForSequenceClassification
+from model.splicebert.modeling_splicebert import SpliceBertForSequenceClassification
+from model.utrbert.modeling_utrbert import UtrBertForSequenceClassification
+from model.utrlm.modeling_utrlm import UtrLmForSequenceClassification
+from tokenizer.tokenization_opensource import OpenRnaLMTokenizer
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
@@ -39,13 +45,16 @@ class ModelArguments:
     lora_alpha: int = field(default=32, metadata={"help": "alpha for LoRA"})
     lora_dropout: float = field(default=0.05, metadata={"help": "dropout rate for LoRA"})
     lora_target_modules: str = field(default="query,value", metadata={"help": "where to perform LoRA"})
-
+    tokenizer_name_or_path: Optional[str] = field(default="zhihan1996/DNABERT-2-117M")
 
 @dataclass
 class DataArguments:
     data_path: str = field(default=None, metadata={"help": "Path to the training data."})
     kmer: int = field(default=-1, metadata={"help": "k-mer for input sequence. -1 means not using k-mer."})
-    
+    data_train_path: str = field(default=None, metadata={"help": "Path to the training data."})
+    data_val_path: str = field(default=None, metadata={"help": "Path to the training data."})
+    data_test_path: str = field(default=None, metadata={"help": "Path to the test data. is list"})
+
 
 
 @dataclass
@@ -83,6 +92,7 @@ class TrainingArguments(transformers.TrainingArguments):
     token_type: str = field(default='6mer')
     train_from_scratch: bool = field(default=False)
     log_dir: str = field(default="output")
+    attn_implementation: str = field(default="eager")
 
 def set_seed(args):
     random.seed(args.seed)
@@ -169,7 +179,7 @@ class SupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
     def __init__(self, 
-                 data_path: str, data_args,
+                 data_path: str, args,
                  tokenizer: transformers.PreTrainedTokenizer, 
                  kmer: int = -1):
 
@@ -229,7 +239,9 @@ class SupervisedDataset(Dataset):
 class DataCollatorForSupervisedDataset(object):
     """Collate examples for supervised fine-tuning."""
 
-    tokenizer: transformers.PreTrainedTokenizer
+    def __init__(self, tokenizer: transformers.PreTrainedTokenizer, args):
+        self.tokenizer = tokenizer
+        self.args = args
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         input_ids, labels, attention_mask = tuple([instance[key] for instance in instances] for key in ("input_ids" ,"labels", "attention_mask"))
@@ -270,6 +282,15 @@ def train():
     # load tokenizer
     if training_args.model_type == 'rnalm':
         tokenizer = EsmTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=True,
+            trust_remote_code=True,
+        )
+    elif training_args.model_type in ['rna-fm','rnabert','rnamsm','splicebert-human510','splicebert-ms510','splicebert-ms1024','utrbert-3mer','utrbert-4mer','utrbert-5mer','utrbert-6mer','utr-lm-mrl','utr-lm-te-el']:
+        tokenizer = OpenRnaLMTokenizer.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
             model_max_length=training_args.model_max_length,
@@ -331,33 +352,66 @@ def train():
                 problem_type="regression",
                 token_type=training_args.token_type,
                 )
-    elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm':
-        if training_args.train_from_scratch:
-            pass
-        else:
-            print(training_args.model_type)
-            print(f'Loading {training_args.model_type} model')
-            model = EsmForSequenceClassification.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                num_labels=train_dataset.num_labels,
-                problem_type="regression",
-                trust_remote_code=True,
-            )    
-
-    # configure LoRA
-    if model_args.use_lora:
-        lora_config = LoraConfig(
-            r=model_args.lora_r,
-            lora_alpha=model_args.lora_alpha,
-            target_modules=list(model_args.lora_target_modules.split(",")),
-            lora_dropout=model_args.lora_dropout,
-            bias="none",
-            task_type="SEQ_CLS",
-            inference_mode=False,
-        )
-        model = get_peft_model(model, lora_config)
-        model.print_trainable_parameters()
+    elif training_args.model_type == 'rna-fm':      
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = RnaFmForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="regression",
+            trust_remote_code=True,
+        )        
+    elif training_args.model_type == 'rnabert':
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = RnaBertForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="regression",
+            trust_remote_code=True,
+        )        
+    elif training_args.model_type == 'rnamsm':
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = RnaMsmForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="regression",
+            trust_remote_code=True,
+        )        
+    elif 'splicebert' in training_args.model_type:
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = SpliceBertForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="regression",
+            trust_remote_code=True,
+        )       
+    elif 'utrbert' in training_args.model_type:
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = UtrBertForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="regression",
+            trust_remote_code=True,
+        )  
+    elif 'utr-lm' in training_args.model_type:
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = UtrLmForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="regression",
+            trust_remote_code=True,
+        )           
 
     # define trainer
     trainer = transformers.Trainer(model=model,
@@ -382,7 +436,7 @@ def train():
         os.makedirs(results_path, exist_ok=True)
         results_test = trainer.evaluate(eval_dataset=test_dataset)
         with open(os.path.join(results_path, "test_results.json"), "w") as f:
-            json.dump(results_test, f)
+            json.dump(results_test, f, indent=4)
 
 
 if __name__ == "__main__":

@@ -55,7 +55,9 @@ class SSDataset(Dataset):
   
         #print(file_path)
         struct = np.load(file_path)
-        #print(seq,ct)
+        if len(seq) > self.tokenizer.model_max_length-2:
+            seq = seq[:self.tokenizer.model_max_length-2]
+            struct = struct[:self.tokenizer.model_max_length-2,:self.tokenizer.model_max_length-2]
         return dict(seq=seq, struct=struct)
 
 class ContactMapDataset(Dataset):
@@ -97,7 +99,7 @@ class ContactMapDataset(Dataset):
         seq = self.texts[idx]
         if len(seq) > self.tokenizer.model_max_length-2:
             seq = seq[:self.tokenizer.model_max_length-2]
-            struct = struct[:self.tokenizer.model_max_length-2][:self.tokenizer.model_max_length-2]
+            struct = struct[:self.tokenizer.model_max_length-2,:self.tokenizer.model_max_length-2]
         return dict(seq=seq, struct=struct)
 
 class DistanceMapDataset(Dataset):
@@ -139,7 +141,10 @@ class DistanceMapDataset(Dataset):
         seq = self.texts[idx]
         if len(seq) > self.tokenizer.model_max_length-2:
             seq = seq[:self.tokenizer.model_max_length-2]
-            struct = struct[:self.tokenizer.model_max_length-2][:self.tokenizer.model_max_length-2]
+            #print(len(seq))
+            #print(struct.shape)
+            struct = struct[:self.tokenizer.model_max_length-2,:self.tokenizer.model_max_length-2]
+            #print(struct.shape)
         return dict(seq=seq, struct=struct)
 
 

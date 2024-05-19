@@ -79,11 +79,12 @@ class collator():
         #max_len = min(max_len, self.tokenizer.model_max_length)
 
         weight_mask = torch.ones((len(seqs), max_len+2)) #including [cls] and [sep], dim= [bz, max_len+2]
-        if self.args.token_type == '6mer':
-            for i in range(1,5):
+        if 'mer' in self.args.token_type:
+            kmer=int(self.args.token_type[0])
+            for i in range(1,kmer-1):
                 weight_mask[:,i+1]=weight_mask[:,-i-2]=1/(i+1) 
-            weight_mask[:, 6:-6] = 1/6
-            seqs = [generate_kmer_str(seq, 6) for seq in seqs]
+            weight_mask[:, kmer:-kmer] = 1/kmer
+            seqs = [generate_kmer_str(seq, kmer) for seq in seqs]
  
         data_dict = self.tokenizer(seqs, 
                         padding='longest', 

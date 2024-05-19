@@ -56,7 +56,7 @@ class SSCNNPredictor(nn.Module):
             hidden_states = output.last_hidden_state
         elif self.args.model_type == 'dnabert2': 
             hidden_states = output[0]
-        elif self.args.model_type == 'rnabert':
+        elif self.args.model_type in ['rna-fm','rnabert','rnamsm','splicebert-human510','splicebert-ms510','splicebert-ms1024','utrbert-3mer','utrbert-4mer','utrbert-5mer','utrbert-6mer','utr-lm-mrl','utr-lm-te-el']:
             hidden_states = output[0]
         #print('hidden_states1',hidden_states.shape)
         ## L*ch-> LxL*ch
@@ -93,15 +93,16 @@ class SSCNNPredictor(nn.Module):
                     nucleotide_logits = nucleotide_logits.to(inter_input.dtype)
                     inter_input.index_put_((bz_indices, pos_indices), nucleotide_logits)
             #mapping_hidden_states = inter_input[:,1:-1,:]
-        elif self.args.token_type == '6mer':
+        elif 'mer' in self.args.token_type:
+            kmer=int(self.args.token_type[0])
             mapping_hidden_states = torch.zeros((batch_size, ori_length, hidden_states.shape[-1]), dtype=hidden_states.dtype, device=hidden_states.device)
             mapping_hidden_states[:,0,:] = hidden_states[:,0,:] #[cls] token
             for bz in range(batch_size):
                 value_length = torch.sum(attention_mask[bz,:]==1).item()
                 print(value_length)
                 for i in range(1,value_length-1): #exclude cls,sep token
-                    mapping_hidden_states[bz,i:i+6,:] += hidden_states[bz,i]
-                mapping_hidden_states[bz,value_length+5-1,:] = hidden_states[bz,value_length-1,:] #[sep] token
+                    mapping_hidden_states[bz,i:i+kmer,:] += hidden_states[bz,i]
+                mapping_hidden_states[bz,value_length+kmer-1-1,:] = hidden_states[bz,value_length-1,:] #[sep] token
         #print(mapping_hidden_states.shape,weight_mask.shape)
         hidden_states = mapping_hidden_states * weight_mask.unsqueeze(2)    
             

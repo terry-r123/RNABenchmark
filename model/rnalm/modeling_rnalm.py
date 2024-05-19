@@ -1740,14 +1740,6 @@ class RNALMForSequenceClassification(RNALMPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
-    # @add_start_docstrings_to_model_forward(BERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
-    # @add_code_sample_docstrings(
-    #     #checkpoint=_CHECKPOINT_FOR_SEQUENCE_CLASSIFICATION,
-    #     output_type=SequenceClassifierOutput,
-    #     config_class=_CONFIG_FOR_DOC,
-    #     expected_output=_SEQ_CLASS_EXPECTED_OUTPUT,
-    #     expected_loss=_SEQ_CLASS_EXPECTED_LOSS,
-    # )
     def forward(
         self,
         input_ids: Optional[torch.Tensor] = None,
@@ -1915,22 +1907,24 @@ class RNALMForNucleotideLevel(RNALMPreTrainedModel):
             #     #print(len(ori_text))
             #     for pos_id in range(1,ori_length-1):
             #         logits[bz,pos_id,:] = self.classifer_dict[ori_text[pos_id-1]](mapping_final_input[bz,pos_id, :])
-        elif self.config.token_type == '6mer':
+        elif 'mer' in self.config.token_type:
+            kmer=int(self.config.token_type[0])
             mapping_final_input = torch.zeros((batch_size, ori_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
             mapping_final_input[:,0,:] = final_input[:,0,:] #[cls] token
             for bz in range(batch_size):
                 value_length = torch.sum(attention_mask[bz,:]==1).item()
                 for i in range(1,value_length-1): #exclude cls,sep token
-                    mapping_final_input[bz,i:i+6,:] += final_input[bz,i]
-                mapping_final_input[bz,value_length+5-1,:] = final_input[bz,value_length-1,:] #[sep] token
+                    mapping_final_input[bz,i:i+kmer,:] += final_input[bz,i]
+                mapping_final_input[bz,value_length+kmer-1-1,:] = final_input[bz,value_length-1,:] #[sep] token
         #print(mapping_final_input.shape,weight_mask.shape)
         mapping_final_input = mapping_final_input * weight_mask.unsqueeze(2)
-        if self.config.token_type == '6mer' or self.config.token_type =='single': 
+        if 'mer' in self.config.token_type or self.config.token_type =='single': 
             logits = self.classifier(mapping_final_input)
         #print(logits.shape)
-        logits = logits[:, 1:1+labels.size(1), :]
+        
         loss = None
         if labels is not None:
+            logits = logits[:, 1:1+labels.size(1), :]
             if self.config.problem_type is None:
                 if self.num_labels == 1:
                     self.config.problem_type = "regression"
@@ -1963,7 +1957,7 @@ class RNALMForNucleotideLevel(RNALMPreTrainedModel):
             attentions=outputs.attentions,
         )
 
-class RnalmForCRISPROffTarget(RNALMPreTrainedModel):
+class RnaLmForCRISPROffTarget(RNALMPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -2042,13 +2036,13 @@ class RnalmForCRISPROffTarget(RNALMPreTrainedModel):
                 loss_fct = BCEWithLogitsLoss()
                 loss = loss_fct(logits, labels)
         if not return_dict:
-            output = (logits,) + outputs[2:]
+            output = (logits,) + sgrna_out[2:]
             return ((loss,) + output) if loss is not None else output
         return SequenceClassifierOutput(
             loss=loss,
             logits=logits,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
+            hidden_states=sgrna_out.hidden_states,
+            attentions=sgrna_out.attentions,
         )
 class RNALMForStructuralimputation(RNALMPreTrainedModel):
     # include Degradation and SpliceAI
@@ -2145,18 +2139,19 @@ class RNALMForStructuralimputation(RNALMPreTrainedModel):
                     nucleotide_logits = nucleotide_logits.to(inter_input.dtype)
                     inter_input.index_put_((bz_indices, pos_indices), nucleotide_logits)
             #mapping_final_input = inter_input[:,1:-1,:]
-        elif self.config.token_type == '6mer':
+        elif 'mer' in self.config.token_type:
+            kmer=int(self.config.token_type[0])
             mapping_final_input = torch.zeros((batch_size, ori_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
             mapping_final_input[:,0,:] = final_input[:,0,:] #[cls] token
             for bz in range(batch_size):
                 value_length = torch.sum(attention_mask[bz,:]==1).item()
                 for i in range(1,value_length-1): #exclude cls,sep token
-                    mapping_final_input[bz,i:i+6,:] += final_input[bz,i]
-                mapping_final_input[bz,value_length+5-1,:] = final_input[bz,value_length-1,:] #[sep] token
+                    mapping_final_input[bz,i:i+kmer,:] += final_input[bz,i]
+                mapping_final_input[bz,value_length+kmer-1-1,:] = final_input[bz,value_length-1,:] #[sep] token
         #print(mapping_final_input.shape,weight_mask.shape)
         mapping_final_input = mapping_final_input * weight_mask.unsqueeze(2)
         
-        if self.config.token_type == '6mer' or self.config.token_type =='single': 
+        if 'mer' in self.config.token_type or self.config.token_type =='single': 
             mapping_final_input = self.down_mlp(mapping_final_input)[:,1:-1,:] # exclude <cls> and <eos>
         elif self.config.token_type == 'bpe' or  self.config.token_type=='non-overlap':
             mapping_final_input = mapping_final_input[:,1:-1,:]

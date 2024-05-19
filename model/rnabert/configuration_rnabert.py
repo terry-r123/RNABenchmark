@@ -90,6 +90,7 @@ class RnaBertConfig(PretrainedConfig):
         use_cache=True,
         head=None,
         lm_head=None,
+        token_type=None,
         **kwargs,
     ):
         if hidden_size is None:
@@ -113,3 +114,4 @@ class RnaBertConfig(PretrainedConfig):
         self.use_cache = use_cache
         self.head = HeadConfig(**head if head is not None else {})
         self.lm_head = MaskedLMHeadConfig(**lm_head if lm_head is not None else {})
+        self.token_type = token_type

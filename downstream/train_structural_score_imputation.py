@@ -27,6 +27,13 @@ from model.rnalm.modeling_rnalm import RNALMForStructuralimputation
 from model.rnalm.rnalm_config import RNALMConfig
 from model.esm.modeling_esm import ESMForStructuralimputation
 from model.esm.esm_config import EsmConfig
+from model.rnafm.modeling_rnafm import RnaFmForStructuralimputation
+from model.rnabert.modeling_rnabert import RnaBertForStructuralimputation
+from model.rnamsm.modeling_rnamsm import RnaMsmForStructuralimputation
+from model.splicebert.modeling_splicebert import SpliceBertForStructuralimputation
+from model.utrbert.modeling_utrbert import UtrBertForStructuralimputation
+from model.utrlm.modeling_utrlm import UtrLmForStructuralimputation
+from tokenizer.tokenization_opensource import OpenRnaLMTokenizer
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
@@ -236,10 +243,14 @@ class SupervisedDataset(Dataset):
         self.input_ids = output["input_ids"]
         self.attention_mask = output["attention_mask"]
         self.weight_mask = torch.ones((self.input_ids.shape[0],seq_length+2))
-        if args.token_type == '6mer':
-            for i in range(1,5):
+        if 'mer' in args.token_type:
+            for i in range(1,kmer-1):
                 self.weight_mask[:,i+1]=self.weight_mask[:,-i-2]=1/(i+1) 
-            self.weight_mask[:, 6:-6] = 1/6
+            self.weight_mask[:, kmer:-kmer] = 1/kmer
+        # if args.token_type == '6mer':
+        #     for i in range(1,5):
+        #         self.weight_mask[:,i+1]=self.weight_mask[:,-i-2]=1/(i+1) 
+        #     self.weight_mask[:, 6:-6] = 1/6
         self.post_token_length = torch.zeros(self.attention_mask.shape)
         if args.token_type == 'bpe' or args.token_type == 'non-overlap':
             self.post_token_length = bpe_position(texts,self.attention_mask,tokenizer)
@@ -322,6 +333,15 @@ def train():
             use_fast=True,
             trust_remote_code=True,
         )
+    elif training_args.model_type in ['rna-fm','rnabert','rnamsm','splicebert-human510','splicebert-ms510','splicebert-ms1024','utrbert-3mer','utrbert-4mer','utrbert-5mer','utrbert-6mer','utr-lm-mrl','utr-lm-te-el']:
+        tokenizer = OpenRnaLMTokenizer.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=True,
+            trust_remote_code=True,
+        )
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
@@ -377,26 +397,78 @@ def train():
                 token_type=training_args.token_type,
                 tokenizer=tokenizer,
                 )
-    elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm':
-        if training_args.train_from_scratch:
-            print(f'Loading {training_args.model_type} model')
-            print('Train from scratch')
-            config = AutoConfig.from_pretrained(model_args.model_name_or_path,
-                num_labels=train_dataset.num_labels)
-            model = transformers.AutoModelForSequenceClassification.from_config(
-                config
-                )
-        else:
-            print(training_args.model_type)
-            print(f'Loading {training_args.model_type} model')
-            model = ESMForStructuralimputation.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                num_labels=train_dataset.num_labels,
-                problem_type="regression",
-                token_type=training_args.token_type,
-                trust_remote_code=True,
-            )        
+    elif training_args.model_type == 'rna-fm':      
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = RnaFmForStructuralimputation.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            trust_remote_code=True,
+            problem_type="regression",
+            token_type=training_args.token_type,
+            tokenizer=tokenizer,  
+        )     
+    elif training_args.model_type == 'rnabert':      
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = RnaBertForStructuralimputation.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            trust_remote_code=True,
+            problem_type="regression",
+            token_type=training_args.token_type,
+            tokenizer=tokenizer,
+        )     
+    elif training_args.model_type == 'rnamsm':
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = RnaMsmForStructuralimputation.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="regression",
+            trust_remote_code=True,
+            token_type=training_args.token_type,
+            tokenizer=tokenizer,  
+        )        
+    elif 'splicebert' in training_args.model_type:
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = SpliceBertForStructuralimputation.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="regression",
+            trust_remote_code=True,
+            token_type=training_args.token_type,
+            tokenizer=tokenizer,  
+        )       
+    elif 'utrbert' in training_args.model_type:
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = UtrBertForStructuralimputation.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="regression",
+            trust_remote_code=True,
+            token_type=training_args.token_type,
+            tokenizer=tokenizer,  
+        )  
+    elif 'utr-lm' in training_args.model_type:
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = UtrLmForStructuralimputation.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="regression",
+            trust_remote_code=True,
+            token_type=training_args.token_type,
+            tokenizer=tokenizer,  
+        )     
 
     # define trainer
     trainer = transformers.Trainer(model=model,

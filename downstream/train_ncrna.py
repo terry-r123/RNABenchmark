@@ -31,8 +31,12 @@ from model.rnalm.rnalm_config import RNALMConfig
 from model.esm.modeling_esm import EsmForSequenceClassification
 from model.esm.esm_config import EsmConfig
 from model.rnafm.modeling_rnafm import RnaFmForSequenceClassification
+from model.rnabert.modeling_rnabert import RnaBertForSequenceClassification
+from model.rnamsm.modeling_rnamsm import RnaMsmForSequenceClassification
+from model.splicebert.modeling_splicebert import SpliceBertForSequenceClassification
+from model.utrbert.modeling_utrbert import UtrBertForSequenceClassification
+from model.utrlm.modeling_utrlm import UtrLmForSequenceClassification
 from tokenizer.tokenization_opensource import OpenRnaLMTokenizer
-#from model.rnabert.modeling_rnabert import RnaBertForSequenceClassification
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
@@ -162,6 +166,8 @@ class SupervisedDataset(Dataset):
         else:
             print(len(data[0]))
             raise ValueError("Data format not supported.")
+        text = texts[0]
+        #print([text[i : i + kmer] for i in range(len(text) - kmer + 1)])
         
         if kmer != -1:
             # only write file on the first process
@@ -176,6 +182,9 @@ class SupervisedDataset(Dataset):
         # ensure tokenier
         print(type(texts[0]))
         print(texts[0])
+        #print(list(texts[0]))
+        #print(texts[0].split())
+        #print([texts[0]])
         test_example = tokenizer.tokenize(texts[0])
         print(test_example)
         print(len(test_example))
@@ -244,7 +253,19 @@ def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
 Compute metrics used for huggingface trainer.
 """
 def compute_metrics(eval_pred):
+    #print(eval_pred)
+    #p.predictions[0] if isinstance(p.predictions, tuple)
     logits, labels = eval_pred
+    # print(logits)
+    # print(labels)
+    # print(len(logits))
+    # print(logits[0].shape)
+    # print(logits[1].shape)
+    
+    # print(labels.shape)
+    # print(logits.shape)
+    #print(type(logits))
+    #print(np.array(logits).shape)
     return calculate_metric_with_sklearn(logits, labels)
 
 def get_parameter_number(model):
@@ -266,7 +287,7 @@ def train():
             use_fast=True,
             trust_remote_code=True,
         )
-    elif training_args.model_type == 'rna-fm':
+    elif training_args.model_type in ['rna-fm','rnabert','rnamsm','splicebert-human510','splicebert-ms510','splicebert-ms1024','utrbert-3mer','utrbert-4mer','utrbert-5mer','utrbert-6mer','utr-lm-mrl','utr-lm-te-el']:
         tokenizer = OpenRnaLMTokenizer.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
@@ -368,6 +389,7 @@ def train():
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
             num_labels=train_dataset.num_labels,
+            problem_type="single_label_classification",
             trust_remote_code=True,
         )        
     elif training_args.model_type == 'rnabert':
@@ -377,15 +399,56 @@ def train():
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
             num_labels=train_dataset.num_labels,
+            problem_type="single_label_classification",
             trust_remote_code=True,
         )        
-        embedding_dim = model.bert.embeddings.word_embeddings.weight.size()
+    elif training_args.model_type == 'rnamsm':
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = RnaMsmForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="single_label_classification",
+            trust_remote_code=True,
+        )        
+    elif 'splicebert' in training_args.model_type:
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = SpliceBertForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="single_label_classification",
+            trust_remote_code=True,
+        )       
+    elif 'utrbert' in training_args.model_type:
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = UtrBertForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="single_label_classification",
+            trust_remote_code=True,
+        )  
+    elif 'utr-lm' in training_args.model_type:
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = UtrLmForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="single_label_classification",
+            trust_remote_code=True,
+        )     
+        # embedding_dim = model.bert.embeddings.word_embeddings.weight.size()
 
-        print(f"Embedding dimension: {embedding_dim}")
-        # 扩展模型嵌入以匹配新词表大小
-        model.resize_token_embeddings(len(tokenizer))
-        embedding_dim = model.bert.embeddings.word_embeddings.weight.size()
-        print(f"Embedding dimension: {embedding_dim}")
+        # print(f"Embedding dimension: {embedding_dim}")
+        # # 扩展模型嵌入以匹配新词表大小
+        # model.resize_token_embeddings(len(tokenizer))
+        # embedding_dim = model.bert.embeddings.word_embeddings.weight.size()
+        # print(f"Embedding dimension: {embedding_dim}")
         
     else:
         if training_args.train_from_scratch:

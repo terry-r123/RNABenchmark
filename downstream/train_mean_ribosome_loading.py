@@ -36,6 +36,11 @@ from model.ntv2.modeling_esm import EsmForSequenceClassification as NTv2ForSeque
 from model.hyenadna.tokenization_hyena import HyenaDNATokenizer
 from model.hyenadna.modeling_hyena import HyenaDNAForSequenceClassification
 from model.rnafm.modeling_rnafm import RnaFmForSequenceClassification
+from model.rnabert.modeling_rnabert import RnaBertForSequenceClassification
+from model.rnamsm.modeling_rnamsm import RnaMsmForSequenceClassification
+from model.splicebert.modeling_splicebert import SpliceBertForSequenceClassification
+from model.utrbert.modeling_utrbert import UtrBertForSequenceClassification
+from model.utrlm.modeling_utrlm import UtrLmForSequenceClassification
 from tokenizer.tokenization_opensource import OpenRnaLMTokenizer
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
@@ -317,7 +322,7 @@ def train():
             use_fast=True,
             trust_remote_code=True,
         )
-    elif training_args.model_type == 'rna-fm':
+    elif training_args.model_type in ['rna-fm','rnabert','rnamsm','splicebert-human510','splicebert-ms510','splicebert-ms1024','utrbert-3mer','utrbert-4mer','utrbert-5mer','utrbert-6mer','utr-lm-mrl','utr-lm-te-el']:
         tokenizer = OpenRnaLMTokenizer.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
@@ -401,28 +406,59 @@ def train():
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
             num_labels=train_dataset.num_labels,
-            trust_remote_code=True,
             problem_type="regression",
-        )     
-    # elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm':
-    #     if training_args.train_from_scratch:
-    #         print('Loading esm model')
-    #         print('Train from scratch')
-    #         config = AutoConfig.from_pretrained(model_args.model_name_or_path,
-    #             num_labels=train_dataset.num_labels)
-    #         model = transformers.AutoModelForSequenceClassification.from_config(
-    #             config
-    #             )
-    #     else:
-    #         print(training_args.model_type)
-    #         print(f'Loading {training_args.model_type} model')
-    #         model = EsmForSequenceClassification.from_pretrained(
-    #             model_args.model_name_or_path,
-    #             cache_dir=training_args.cache_dir,
-    #             num_labels=train_dataset.num_labels,
-    #             problem_type="regression",
-    #             trust_remote_code=True,
-    #         )        
+            trust_remote_code=True,
+        )        
+    elif training_args.model_type == 'rnabert':
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = RnaBertForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="regression",
+            trust_remote_code=True,
+        )        
+    elif training_args.model_type == 'rnamsm':
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = RnaMsmForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="regression",
+            trust_remote_code=True,
+        )        
+    elif 'splicebert' in training_args.model_type:
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = SpliceBertForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="regression",
+            trust_remote_code=True,
+        )       
+    elif 'utrbert' in training_args.model_type:
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = UtrBertForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="regression",
+            trust_remote_code=True,
+        )  
+    elif 'utr-lm' in training_args.model_type:
+        print(training_args.model_type)
+        print(f'Loading {training_args.model_type} model')
+        model = UtrLmForSequenceClassification.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+            num_labels=train_dataset.num_labels,
+            problem_type="regression",
+            trust_remote_code=True,
+        )           
     elif training_args.model_type == 'hyenadna':
         if training_args.train_from_scratch:
             pass
