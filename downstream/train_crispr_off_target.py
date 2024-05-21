@@ -432,7 +432,7 @@ def train():
         os.makedirs(results_path, exist_ok=True)
         results_test = trainer.evaluate(eval_dataset=test_dataset)
         with open(os.path.join(results_path, "test_results.json"), "w") as f:
-            json.dump(results_val, f, indent=4)
+            json.dump(results_test, f, indent=4)
 
 if __name__ == "__main__":
     train()

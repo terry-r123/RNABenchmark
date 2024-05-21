@@ -54,7 +54,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 42 666 3407
+for seed in  666 #3407 42
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -108,7 +108,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 42 666 3407
+for seed in 3407 #42 666 
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -142,6 +142,10 @@ do
         --token_type ${token} \
         --model_type ${MODEL_TYPE} \
  
+        for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do export $v=http://u-cEoRwn:EDvFuZTe@172.16.4.9:3128; done 
+
+        kaggle competitions submit -c stanford-covid-vaccine -f ${OUTPUT_PATH}/results/${MODEL_TYPE}_${data}_seed${seed}/submission_${MODEL_TYPE}.csv -m "Message"
+
    
 done
 
@@ -194,6 +198,10 @@ do
         --token_type ${token} \
         --model_type ${MODEL_TYPE} \
  
+        for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do export $v=http://u-cEoRwn:EDvFuZTe@172.16.4.9:3128; done 
+
+        kaggle competitions submit -c stanford-covid-vaccine -f ${OUTPUT_PATH}/results/${MODEL_TYPE}_${data}_seed${seed}/submission_${MODEL_TYPE}.csv -m "Message"
+
    
 done
 
@@ -243,6 +251,10 @@ do
         --seed ${seed} \
         --token_type ${token} \
         --model_type ${MODEL_TYPE} \
+
+        for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do export $v=http://u-cEoRwn:EDvFuZTe@172.16.4.9:3128; done 
+
+        kaggle competitions submit -c stanford-covid-vaccine -f ${OUTPUT_PATH}/results/${MODEL_TYPE}_${data}_seed${seed}/submission_${MODEL_TYPE}.csv -m "Message"
  
    
 done
@@ -295,6 +307,10 @@ do
         --seed ${seed} \
         --token_type ${token} \
         --model_type ${MODEL_TYPE} \
+
+        for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do export $v=http://u-cEoRwn:EDvFuZTe@172.16.4.9:3128; done 
+
+        kaggle competitions submit -c stanford-covid-vaccine -f ${OUTPUT_PATH}/results/${MODEL_TYPE}_${data}_seed${seed}/submission_${MODEL_TYPE}.csv -m "Message"
  
    
 done
@@ -315,7 +331,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 666 42 3407
+for seed in 666 #42 3407
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -347,6 +363,10 @@ do
         --seed ${seed} \
         --token_type ${token} \
         --model_type ${MODEL_TYPE} \
+
+        for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do export $v=http://u-cEoRwn:EDvFuZTe@172.16.4.9:3128; done 
+
+        kaggle competitions submit -c stanford-covid-vaccine -f ${OUTPUT_PATH}/results/${MODEL_TYPE}_${data}_seed${seed}/submission_${MODEL_TYPE}.csv -m "Message"
  
    
 done
@@ -367,7 +387,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 666 3407 42 
+for seed in 666 42 #3407 
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -399,6 +419,10 @@ do
         --seed ${seed} \
         --token_type ${token} \
         --model_type ${MODEL_TYPE} \
+
+        for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do export $v=http://u-cEoRwn:EDvFuZTe@172.16.4.9:3128; done 
+
+        kaggle competitions submit -c stanford-covid-vaccine -f ${OUTPUT_PATH}/results/${MODEL_TYPE}_${data}_seed${seed}/submission_${MODEL_TYPE}.csv -m "Message"
  
    
 done
@@ -419,7 +443,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 42 666 3407
+for seed in 42 #666 3407
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -451,6 +475,10 @@ do
         --seed ${seed} \
         --token_type ${token} \
         --model_type ${MODEL_TYPE} \
+
+        for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do export $v=http://u-cEoRwn:EDvFuZTe@172.16.4.9:3128; done 
+
+        kaggle competitions submit -c stanford-covid-vaccine -f ${OUTPUT_PATH}/results/${MODEL_TYPE}_${data}_seed${seed}/submission_${MODEL_TYPE}.csv -m "Message"
  
    
 done
@@ -471,7 +499,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 42 666 3407
+for seed in  3407 #42 666
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -504,60 +532,66 @@ do
         --token_type ${token} \
         --model_type ${MODEL_TYPE} \
  
+        for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do export $v=http://u-cEoRwn:EDvFuZTe@172.16.4.9:3128; done 
+
+        kaggle competitions submit -c stanford-covid-vaccine -f ${OUTPUT_PATH}/results/${MODEL_TYPE}_${data}_seed${seed}/submission_${MODEL_TYPE}.csv -m "Message"
    
 done
 
-MODEL_TYPE='utr-lm-mrl'
+# MODEL_TYPE='utr-lm-mrl'
 
 
-token='single'
-pos='rope'
+# token='single'
+# pos='rope'
 
-batch_size=32
-model_max_length=1026
-lr=5e-3
-data=''
+# batch_size=32
+# model_max_length=1026
+# lr=5e-3
+# data=''
 
-MODEL_PATH=${data_root}multi-omics/RNA/model/opensource/${MODEL_TYPE}
-OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}  
+# MODEL_PATH=${data_root}multi-omics/RNA/model/opensource/${MODEL_TYPE}
+# OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}  
 
 
         
-for seed in 666 3407 42 
-do
+# for seed in 666 3407 42 
+# do
 
-    master_port=$(shuf -i 10000-45000 -n 1)
-    echo "Using port $master_port for communication."
-    EXEC_PREFIX="${run_type} --nodes=1 -p ${quotatype} -A ${partition} --job-name=${MODEL_TYPE}_${task}  --gres=gpu:$nproc_per_node --cpus-per-task=32 torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"           
-    echo ${MODEL_PATH}
+#     master_port=$(shuf -i 10000-45000 -n 1)
+#     echo "Using port $master_port for communication."
+#     EXEC_PREFIX="${run_type} --nodes=1 -p ${quotatype} -A ${partition} --job-name=${MODEL_TYPE}_${task}  --gres=gpu:$nproc_per_node --cpus-per-task=32 torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"           
+#     echo ${MODEL_PATH}
 
-    ${EXEC_PREFIX} \
-    downstream/train_degradation.py \
-        --model_name_or_path $MODEL_PATH \
-        --data_path  $DATA_PATH/$data \
-        --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
-        --run_name ${MODEL_TYPE}_${data}_seed${seed} \
-        --model_max_length ${model_max_length} \
-        --per_device_train_batch_size ${batch_size} \
-        --per_device_eval_batch_size 32 \
-        --gradient_accumulation_steps 1 \
-        --learning_rate ${lr} \
-        --num_train_epochs 100 \
-        --fp16 \
-        --save_steps 400 \
-        --output_dir ${OUTPUT_PATH} \
-        --evaluation_strategy steps \
-        --eval_steps 200 \
-        --warmup_steps 50 \
-        --logging_steps 200 \
-        --overwrite_output_dir True \
-        --log_level info \
-        --seed ${seed} \
-        --token_type ${token} \
-        --model_type ${MODEL_TYPE} \
+#     ${EXEC_PREFIX} \
+#     downstream/train_degradation.py \
+#         --model_name_or_path $MODEL_PATH \
+#         --data_path  $DATA_PATH/$data \
+#         --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
+#         --run_name ${MODEL_TYPE}_${data}_seed${seed} \
+#         --model_max_length ${model_max_length} \
+#         --per_device_train_batch_size ${batch_size} \
+#         --per_device_eval_batch_size 32 \
+#         --gradient_accumulation_steps 1 \
+#         --learning_rate ${lr} \
+#         --num_train_epochs 100 \
+#         --fp16 \
+#         --save_steps 400 \
+#         --output_dir ${OUTPUT_PATH} \
+#         --evaluation_strategy steps \
+#         --eval_steps 200 \
+#         --warmup_steps 50 \
+#         --logging_steps 200 \
+#         --overwrite_output_dir True \
+#         --log_level info \
+#         --seed ${seed} \
+#         --token_type ${token} \
+#         --model_type ${MODEL_TYPE} \
  
+#         for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do export $v=http://u-cEoRwn:EDvFuZTe@172.16.4.9:3128; done 
+
+#         kaggle competitions submit -c stanford-covid-vaccine -f ${OUTPUT_PATH}/results/${MODEL_TYPE}_${data}_seed${seed}/submission_${MODEL_TYPE}.csv -m "Message"
    
-done
+# done
 
 MODEL_TYPE='utr-lm-te-el'
 
@@ -574,7 +608,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 42 666 3407
+for seed in 666 3407 #42 
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -607,5 +641,8 @@ do
         --token_type ${token} \
         --model_type ${MODEL_TYPE} \
  
+        for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do export $v=http://u-cEoRwn:EDvFuZTe@172.16.4.9:3128; done 
+
+        kaggle competitions submit -c stanford-covid-vaccine -f ${OUTPUT_PATH}/results/${MODEL_TYPE}_${data}_seed${seed}/submission_${MODEL_TYPE}.csv -m "Message"
    
 done

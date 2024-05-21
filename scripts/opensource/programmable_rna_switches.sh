@@ -102,7 +102,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 42 666 3407
+for seed in 666 3407 #42 
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -155,7 +155,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 3407 42 666 
+for seed in 42 #666 3407 
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -205,7 +205,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 3407 42 666 
+for seed in 3407 #666  42
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -257,7 +257,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 42 666 3407
+for seed in 42 3407 #666 
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -361,7 +361,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 666 3407 42 
+for seed in 666 3407 #42 
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -509,7 +509,7 @@ pos='rope'
 DATA_PATH=${data_root}multi-omics/RNA/downstream/${task}
 batch_size=32
 model_max_length=1026
-lr=5e-3
+lr=1e-3 #5e-3
 data=''
 
 MODEL_PATH=${data_root}multi-omics/RNA/model/opensource/${MODEL_TYPE}
@@ -517,7 +517,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 666 3407 42 
+for seed in 42  666 #3407 
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -568,7 +568,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 42 666 3407
+for seed in 666 #3407 42 
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)

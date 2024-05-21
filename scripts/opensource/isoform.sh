@@ -63,7 +63,7 @@ do
     echo ${MODEL_PATH}
 
     ${EXEC_PREFIX} \
-    downstream/train_isoform.py.py \
+    downstream/train_isoform.py \
         --model_name_or_path $MODEL_PATH \
         --data_path  $DATA_PATH/$data \
         --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
@@ -114,7 +114,7 @@ do
     echo ${MODEL_PATH}
 
     ${EXEC_PREFIX} \
-    downstream/train_isoform.py.py \
+    downstream/train_isoform.py \
         --model_name_or_path $MODEL_PATH \
         --data_path  $DATA_PATH/$data \
         --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
@@ -166,7 +166,7 @@ do
     echo ${MODEL_PATH}
 
     ${EXEC_PREFIX} \
-    downstream/train_isoform.py.py \
+    downstream/train_isoform.py \
         --model_name_or_path $MODEL_PATH \
         --data_path  $DATA_PATH/$data \
         --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
@@ -216,7 +216,7 @@ do
     echo ${MODEL_PATH}
 
     ${EXEC_PREFIX} \
-    downstream/train_isoform.py.py \
+    downstream/train_isoform.py \
         --model_name_or_path $MODEL_PATH \
         --data_path  $DATA_PATH/$data \
         --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
@@ -268,7 +268,7 @@ do
     echo ${MODEL_PATH}
 
     ${EXEC_PREFIX} \
-    downstream/train_isoform.py.py \
+    downstream/train_isoform.py \
         --model_name_or_path $MODEL_PATH \
         --data_path  $DATA_PATH/$data \
         --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
@@ -320,7 +320,7 @@ do
     echo ${MODEL_PATH}
 
     ${EXEC_PREFIX} \
-    downstream/train_isoform.py.py \
+    downstream/train_isoform.py \
         --model_name_or_path $MODEL_PATH \
         --data_path  $DATA_PATH/$data \
         --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
@@ -372,7 +372,7 @@ do
     echo ${MODEL_PATH}
 
     ${EXEC_PREFIX} \
-    downstream/train_isoform.py.py \
+    downstream/train_isoform.py \
         --model_name_or_path $MODEL_PATH \
         --data_path  $DATA_PATH/$data \
         --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
@@ -424,7 +424,7 @@ do
     echo ${MODEL_PATH}
 
     ${EXEC_PREFIX} \
-    downstream/train_isoform.py.py \
+    downstream/train_isoform.py \
         --model_name_or_path $MODEL_PATH \
         --data_path  $DATA_PATH/$data \
         --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
@@ -476,7 +476,7 @@ do
     echo ${MODEL_PATH}
 
     ${EXEC_PREFIX} \
-    downstream/train_isoform.py.py \
+    downstream/train_isoform.py \
         --model_name_or_path $MODEL_PATH \
         --data_path  $DATA_PATH/$data \
         --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
@@ -528,7 +528,7 @@ do
     echo ${MODEL_PATH}
 
     ${EXEC_PREFIX} \
-    downstream/train_isoform.py.py \
+    downstream/train_isoform.py \
         --model_name_or_path $MODEL_PATH \
         --data_path  $DATA_PATH/$data \
         --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \
@@ -579,7 +579,7 @@ do
     echo ${MODEL_PATH}
 
     ${EXEC_PREFIX} \
-    downstream/train_isoform.py.py \
+    downstream/train_isoform.py \
         --model_name_or_path $MODEL_PATH \
         --data_path  $DATA_PATH/$data \
         --data_train_path ${data_file_train} --data_val_path ${data_file_val} --data_test_path ${data_file_test}   \

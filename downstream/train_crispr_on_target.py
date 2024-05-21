@@ -332,25 +332,23 @@ def train():
             config = RNALMConfig.from_pretrained(model_args.model_name_or_path,
                 num_labels=train_dataset.num_labels,
                 problem_type="regression",
+                token_type=training_args.token_type,
+                attn_implementation=training_args.attn_implementation,
                 )
-            model =  BertForSequenceClassification(
-                config
+            model =  RNALMForSequenceClassification(
+                config,
+               
                 )
         else:
-            print('Loading rnalm model')
-            #config = MMoeBertConfig.from_pretrained(model_args.model_name_or_path, cache_dir=training_args.cache_dir)
-            #config.use_flash_attn = False
-            print(train_dataset.num_labels)
-            #config.num_labels=train_dataset.num_labels
-            #from transformers import BertForSequenceClassification
-            model =  BertForRegression.from_pretrained(
+            print(f'Loading {training_args.model_type} model')
+            model =  RNALMForSequenceClassification.from_pretrained(
                 model_args.model_name_or_path,
-                #config = config,
                 cache_dir=training_args.cache_dir,
                 num_labels=train_dataset.num_labels,
-                #trust_remote_code=True,
+                trust_remote_code=True,
                 problem_type="regression",
                 token_type=training_args.token_type,
+                attn_implementation=training_args.attn_implementation,
                 )
     elif training_args.model_type == 'rna-fm':      
         print(training_args.model_type)

@@ -5,7 +5,7 @@
 gpu_device="2"
 
 nproc_per_node=1
-partition='ai4bio'
+partition='ailab'
 USE_SLURM='2'
 
 
@@ -13,7 +13,7 @@ export CUDA_LAUNCH_BLOCKING=1
 if [ "$USE_SLURM" == "1" ]; then
     EXEC_PREFIX="srun --job-name=${MODEL_TYPE}_${data} --gres=gpu:$nproc_per_node --cpus-per-task=$(($nproc_per_node * 5)) --mem=50G"
 elif [ "$USE_SLURM" == "2" ]; then
-    quotatype='vip_gpu_ailab'
+    quotatype='vip_gpu_ailab_low'
     run_type='sbatch'
     module load anaconda/2021.11
     module load cuda/11.7.0
@@ -42,7 +42,7 @@ pos='ape'
 DATA_PATH=${data_root}multi-omics/RNA/downstream/${task}
 batch_size=32
 model_max_length=440
-lr=1e-4
+lr=5e-4 #1e-4
 data=''
 data_file_train=train.csv; data_file_val=val.csv; data_file_test=test.csv
 MODEL_PATH=${data_root}multi-omics/RNA/model/opensource/${MODEL_TYPE}
@@ -50,7 +50,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 666 3407 #42 
+for seed in 666 #3407 #42 
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -363,7 +363,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 666 3407 #42 
+for seed in 666 #3407 #42 
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)

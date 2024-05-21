@@ -375,6 +375,7 @@ def train():
 
     # load model
     if training_args.model_type == 'rnalm':
+        print(training_args.model_type)
         if training_args.train_from_scratch:
             print('Train from scratch')
             config = RNALMConfig.from_pretrained(model_args.model_name_or_path,
@@ -388,16 +389,16 @@ def train():
                 config,
                 )
         else:
-            print('Loading rnalm model')
-            print(train_dataset.num_labels)
+            print(f'Loading {training_args.model_type} model')
+            #print(train_dataset.num_labels)
             model =  RNALMForSequenceClassification.from_pretrained(
                 model_args.model_name_or_path,
-                #config = config,
                 cache_dir=training_args.cache_dir,
                 num_labels=train_dataset.num_labels,
-                #trust_remote_code=True,
+                trust_remote_code=True,
                 problem_type="regression",
                 token_type=training_args.token_type,
+                attn_implementation=training_args.attn_implementation,
                 )
     elif training_args.model_type == 'rna-fm':      
         print(training_args.model_type)

@@ -54,7 +54,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 42 666 3407
+for seed in 42 3407 #666
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -96,7 +96,7 @@ MODEL_TYPE='rnamsm'
 token='single'
 pos='ape'
 
-batch_size=32
+batch_size=16
 model_max_length=1024
 lr=3e-5
 data=''
@@ -122,7 +122,7 @@ do
         --model_max_length ${model_max_length} \
         --per_device_train_batch_size ${batch_size} \
         --per_device_eval_batch_size 32 \
-        --gradient_accumulation_steps 1 \
+        --gradient_accumulation_steps 2 \
         --learning_rate ${lr} \
         --num_train_epochs 30 \
         --fp16 \
@@ -158,7 +158,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 3407 42 666 
+for seed in 3407 #42 666 
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -208,7 +208,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 3407 42 666 
+for seed in  42 #666 3407
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -260,7 +260,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 42 666 3407
+for seed in 42 #666 3407
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -468,7 +468,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 42 666 3407
+for seed in 666 3407 #42 
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -520,7 +520,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 666 3407 42 
+for seed in 666 3407 #42 
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
@@ -571,7 +571,7 @@ OUTPUT_PATH=./outputs/ft/rna-all/${task}/rna/opensource/${MODEL_TYPE}
 
 
         
-for seed in 42 666 3407
+for seed in  666 3407 #42
 do
 
     master_port=$(shuf -i 10000-45000 -n 1)
