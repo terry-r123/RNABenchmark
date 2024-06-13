@@ -53,7 +53,6 @@ class SSDataset(Dataset):
         file_path = os.path.join(self.data_path, file_name + '.npy')
         os.path.exists(file_path)
   
-        #print(file_path)
         struct = np.load(file_path)
         if len(seq) > self.tokenizer.model_max_length-2:
             seq = seq[:self.tokenizer.model_max_length-2]
@@ -72,7 +71,6 @@ class ContactMapDataset(Dataset):
         else:
             print(len(data[0]))
             raise ValueError("Data format not supported.")
-        #texts = [generate_kmer_str(text) for text in texts]
         self.tokenizer = tokenizer
         self.args = args
         self.ids = ids
@@ -114,7 +112,6 @@ class DistanceMapDataset(Dataset):
         else:
             print(len(data[0]))
             raise ValueError("Data format not supported.")
-        #texts = [generate_kmer_str(text) for text in texts]
         self.tokenizer = tokenizer
         self.args = args
         self.ids = ids
@@ -141,10 +138,7 @@ class DistanceMapDataset(Dataset):
         seq = self.texts[idx]
         if len(seq) > self.tokenizer.model_max_length-2:
             seq = seq[:self.tokenizer.model_max_length-2]
-            #print(len(seq))
-            #print(struct.shape)
             struct = struct[:self.tokenizer.model_max_length-2,:self.tokenizer.model_max_length-2]
-            #print(struct.shape)
         return dict(seq=seq, struct=struct)
 
 

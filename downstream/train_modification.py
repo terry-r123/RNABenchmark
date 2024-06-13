@@ -18,15 +18,14 @@ import pandas as pd
 os.environ["WANDB_DISABLED"] = "true"
 from sklearn.metrics import roc_auc_score, matthews_corrcoef 
 
-
-from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel
+from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel, EarlyStoppingCallback
 import sys
 
 current_path = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_path)
 sys.path.append(parent_dir)
-from model.rnalm.modeling_rnalm import RNALMForSequenceClassification
-from model.rnalm.rnalm_config import RNALMConfig
+from model.rnalm.modeling_rnalm import RnaLmForSequenceClassification
+from model.rnalm.rnalm_config import RnaLmConfig
 from model.rnafm.modeling_rnafm import RnaFmForSequenceClassification
 from model.rnabert.modeling_rnabert import RnaBertForSequenceClassification
 from model.rnamsm.modeling_rnamsm import RnaMsmForSequenceClassification
@@ -37,7 +36,7 @@ from tokenizer.tokenization_opensource import OpenRnaLMTokenizer
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
-    model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
+    model_name_or_path: Optional[str] = field(default="")
     use_lora: bool = field(default=False, metadata={"help": "whether to use LoRA"})
     use_alibi: bool = field(default=True, metadata={"help": "whether to use alibi"})
     use_features: bool = field(default=True, metadata={"help": "whether to use alibi"})
@@ -45,7 +44,7 @@ class ModelArguments:
     lora_alpha: int = field(default=32, metadata={"help": "alpha for LoRA"})
     lora_dropout: float = field(default=0.05, metadata={"help": "dropout rate for LoRA"})
     lora_target_modules: str = field(default="query,value", metadata={"help": "where to perform LoRA"})
-    tokenizer_name_or_path: Optional[str] = field(default="zhihan1996/DNABERT-2-117M")
+    tokenizer_name_or_path: Optional[str] = field(default="")
 
 @dataclass
 class DataArguments:
@@ -87,11 +86,13 @@ class TrainingArguments(transformers.TrainingArguments):
     report_to: str = field(default="tensorboard")
     metric_for_best_model: str = field(default="mean_auc")
     stage: str = field(default='0')
-    model_type: str = field(default='dna')
+    model_type: str = field(default='rna')
     token_type: str = field(default='6mer')
     train_from_scratch: bool = field(default=False)
     log_dir: str = field(default="output")
     attn_implementation: str = field(default="eager")
+    dataloader_num_workers: int = field(default=4)
+    dataloader_prefetch_factor: int = field(default=2)
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
     """Collects the state dict and dump to disk."""
     state_dict = trainer.model.state_dict()
@@ -108,27 +109,21 @@ def set_seed(args):
         print("!!!!!!!!!!!!!", "Yes")
         torch.cuda.manual_seed_all(args.seed)
 
-"""
-Get the reversed complement of the original DNA sequence.
-"""
-def get_alter_of_dna_sequence(sequence: str):
-    MAP = {"A": "T", "T": "A", "C": "G", "G": "C"}
-    # return "".join([MAP[c] for c in reversed(sequence)])
-    return "".join([MAP[c] for c in sequence])
+
 
 """
-Transform a dna sequence to k-mer string
+Transform a rna sequence to k-mer string
 """
 def generate_kmer_str(sequence: str, k: int) -> str:
-    """Generate k-mer string from DNA sequence."""
+    """Generate k-mer string from rna sequence."""
     return " ".join([sequence[i:i+k] for i in range(len(sequence) - k + 1)])
 
 
 """
-Load or generate k-mer string for each DNA sequence. The generated k-mer string will be saved to the same directory as the original data with the same name but with a suffix of "_{k}mer".
+Load or generate k-mer string for each rna sequence. The generated k-mer string will be saved to the same directory as the original data with the same name but with a suffix of "_{k}mer".
 """
 def load_or_generate_kmer(data_path: str, texts: List[str], k: int) -> List[str]:
-    """Load or generate k-mer string for each DNA sequence."""
+    """Load or generate k-mer string for each rna sequence."""
     kmer_path = data_path.replace(".csv", f"_{k}mer.json")
     if os.path.exists(kmer_path):
         logging.warning(f"Loading k-mer from {kmer_path}...")
@@ -154,20 +149,31 @@ class SupervisedDataset(Dataset):
         super(SupervisedDataset, self).__init__()
 
         # load data from the disk
-        self.data = pd.read_csv(data_path, sep=",", header=None, dtype={i: np.int8 for i in range(1, 920)})
-        self.data["targets"] = list(self.data.iloc[:, 1:].values)
-        self.data = self.data[[0, "targets"]]
-        self.data.columns = ["seq", "targets"]
+        data = pd.read_csv(data_path, sep=",")
+
+        # Processing the 'label' column: converting space-separated strings to a list of integers
+        # We store these lists in a new column called 'targets'
+        data['targets'] = data['label'].apply(lambda x: np.array(x.split(), dtype=np.int8))
+
+        # Now, focus on the sequence data and the new 'targets' column
+        data = data[['sequence', 'targets']]
+        data.columns = ['seq', 'targets']  # Renaming columns for clarity
+
+        # Additional properties you might need
         self.num_labels = 12
-        self.kmer = kmer
-        self.tokenizer = tokenizer
-         # ensure tokenier
-        print(type(self.data["seq"][0]))
-        print(self.data["seq"][0])
-        test_example = tokenizer.tokenize(self.data["seq"][0])
+        self.kmer = kmer  # Ensure 'kmer' is defined or passed appropriately
+        self.tokenizer = tokenizer  # Ensure 'tokenizer' is initialized
+
+        # Testing and validating the tokenizer on the first sequence
+        print(type(data['seq'].iloc[0]))
+        print(data['seq'].iloc[0])
+        test_example = tokenizer.tokenize(data['seq'].iloc[0])
         print(test_example)
         print(len(test_example))
-        print(tokenizer(self.data["seq"][0]))
+        print(tokenizer(data['seq'].iloc[0]))
+
+        # Ensure you set your dataset correctly in the class
+        self.data = data
 
     def __len__(self):
         return len(self.data)
@@ -177,7 +183,6 @@ class SupervisedDataset(Dataset):
         labels = self.data["targets"][idx].astype(np.float32)
         if self.kmer != -1:
             sample = generate_kmer_str(sample,self.kmer)
-        #print(sample)
 
         output = self.tokenizer(
             sample, 
@@ -187,9 +192,7 @@ class SupervisedDataset(Dataset):
             truncation=True,)
 
         input_ids = output["input_ids"][0]
-        #print(input_ids)
         attention_mask = output["attention_mask"][0]
-        # features["labels"] = targets.astype(np.float32)
         return dict(input_ids=input_ids, labels=labels, attention_mask=attention_mask)
 @dataclass
 class DataCollatorForSupervisedDataset(object):
@@ -204,9 +207,7 @@ class DataCollatorForSupervisedDataset(object):
         input_ids = torch.nn.utils.rnn.pad_sequence(
             input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
         )
-        # labels = torch.Tensor(labels).float()
         labels = torch.tensor(np.array(labels)).float()
-        # pdb.set_trace()
         attention_mask = torch.stack(attention_mask)
         
         return dict(
@@ -214,18 +215,15 @@ class DataCollatorForSupervisedDataset(object):
             labels=labels,
             attention_mask=attention_mask,
         )
-
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
 """
 Manually calculate the accuracy, f1, matthews_correlation, precision, recall with sklearn.
 """
 def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
     metrics = {}
-    # logits_torch = torch.from_numpy(logits).float()
-    # p = torch.sigmoid(logits_torch)
-    p = torch.sigmoid(logits)
+    p = sigmoid(logits)
     y = labels
-    # y, p = data['labels'], torch.sigmoid(data['predictions'])
-    # compute auc for each class independetly, https://github.com/jimmyyhwu/deepsea/blob/master/compute_aucs.py#L46
     aucs = np.zeros(12, dtype=np.float32)
     mcc_scores = []
     for i in range(12):
@@ -247,7 +245,6 @@ def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
     metrics['hm7G_auc'] = float(np.median(aucs[9]))
     metrics['hPsi_auc'] = float(np.median(aucs[10]))
     metrics['Atol_auc'] = float(np.median(aucs[11]))
-    #metrics['median_auc'] = float(np.median(metrics['hAm']+metrics['hCm']+metrics['hGm']+metrics['hUm']+metrics['hm1A']+metrics['hm5C']+metrics['hm5U']+metrics['hm6A']+metrics['hm6Am']+metrics['hm7G']+metrics['hPsi']+metrics['Atol'])/12.0)
     metrics['mean_auc'] = (metrics['hAm_auc']+metrics['hCm_auc']+metrics['hGm_auc']+metrics['hUm_auc']+metrics['hm1A_auc']+metrics['hm5C_auc']+metrics['hm5U_auc']+metrics['hm6A_auc']+metrics['hm6Am_auc']+metrics['hm7G_auc']+metrics['hPsi_auc']+metrics['Atol_auc']) / 12.0
     metrics['mean_mcc'] = np.mean(mcc_scores)
     
@@ -323,27 +320,26 @@ def train():
     if training_args.model_type == 'rnalm':
         if training_args.train_from_scratch:
             print('Train from scratch')
-            config = RNALMConfig.from_pretrained(model_args.model_name_or_path,
+            config = RnaLmConfig.from_pretrained(model_args.model_name_or_path,
                 num_labels=train_dataset.num_labels,
                 problem_type="multi_label_classification",
                 token_type=training_args.token_type,
-                use_flash_att = False,
+                attn_implementation=training_args.attn_implementation,
                 )
             print(config)
-            model =  RNALMForSequenceClassification(
+            model =  RnaLmForSequenceClassification(
                 config,
                 )
         else:
-            print('Loading rnalm model')
-            print(train_dataset.num_labels)
-            model =  RNALMForSequenceClassification.from_pretrained(
+            print(f'Loading {training_args.model_type} model')
+            model =  RnaLmForSequenceClassification.from_pretrained(
                 model_args.model_name_or_path,
-                #config = config,
                 cache_dir=training_args.cache_dir,
                 num_labels=train_dataset.num_labels,
-                #trust_remote_code=True,
+                trust_remote_code=True,
                 problem_type="multi_label_classification",
                 token_type=training_args.token_type,
+                attn_implementation=training_args.attn_implementation,
                 )
     elif training_args.model_type == 'rna-fm':      
         print(training_args.model_type)

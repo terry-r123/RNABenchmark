@@ -23,10 +23,8 @@ import sys
 current_path = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_path)
 sys.path.append(parent_dir)
-from model.rnalm.modeling_rnalm import RNALMForStructuralimputation
-from model.rnalm.rnalm_config import RNALMConfig
-from model.esm.modeling_esm import ESMForStructuralimputation
-from model.esm.esm_config import EsmConfig
+from model.rnalm.modeling_rnalm import RnaLmForStructuralimputation
+from model.rnalm.rnalm_config import RnaLmConfig
 from model.rnafm.modeling_rnafm import RnaFmForStructuralimputation
 from model.rnabert.modeling_rnabert import RnaBertForStructuralimputation
 from model.rnamsm.modeling_rnamsm import RnaMsmForStructuralimputation
@@ -37,7 +35,7 @@ from tokenizer.tokenization_opensource import OpenRnaLMTokenizer
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
-    model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
+    model_name_or_path: Optional[str] = field(default="")
     use_lora: bool = field(default=False, metadata={"help": "whether to use LoRA"})
     use_alibi: bool = field(default=True, metadata={"help": "whether to use alibi"})
     use_features: bool = field(default=True, metadata={"help": "whether to use alibi"})
@@ -45,7 +43,7 @@ class ModelArguments:
     lora_alpha: int = field(default=32, metadata={"help": "alpha for LoRA"})
     lora_dropout: float = field(default=0.05, metadata={"help": "dropout rate for LoRA"})
     lora_target_modules: str = field(default="query,value", metadata={"help": "where to perform LoRA"})
-    tokenizer_name_or_path: Optional[str] = field(default="zhihan1996/DNABERT-2-117M")
+    tokenizer_name_or_path: Optional[str] = field(default="")
 
 
 @dataclass
@@ -76,7 +74,6 @@ class TrainingArguments(transformers.TrainingArguments):
     weight_decay: float = field(default=0.01)
     learning_rate: float = field(default=1e-4)
     save_total_limit: int = field(default=1)
-    #lr_scheduler_type: str = field(default="cosine_with_restarts")
     load_best_model_at_end: bool = field(default=True)
     output_dir: str = field(default="output")
     find_unused_parameters: bool = field(default=False)
@@ -88,11 +85,13 @@ class TrainingArguments(transformers.TrainingArguments):
     report_to: str = field(default="tensorboard")
     metric_for_best_model : str = field(default="r^2")
     stage: str = field(default='0')
-    model_type: str = field(default='dna')
+    model_type: str = field(default='rna')
     token_type: str = field(default='6mer')
     train_from_scratch: bool = field(default=False)
     log_dir: str = field(default="output")
     attn_implementation: str = field(default="eager")
+    dataloader_num_workers: int = field(default=4)
+    dataloader_prefetch_factor: int = field(default=2)
 def set_seed(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -110,48 +109,11 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
         del state_dict
         trainer._save(output_dir, state_dict=cpu_state_dict)  # noqa
 
-def remove_non_acgt_chars(sequence):
-    pattern = '[^ACGT]'
-    cleaned_sequence = re.sub(pattern, '', sequence)
-    return cleaned_sequence
-
-def replace_consecutive_ns(sequence, n=10):
-    pattern = 'N' * n + '+'
-    return re.sub(pattern, 'N', sequence)
-
-
 """
-Get the reversed complement of the original DNA sequence.
-"""
-def get_alter_of_dna_sequence(sequence: str):
-    MAP = {"A": "T", "T": "A", "C": "G", "G": "C"}
-    # return "".join([MAP[c] for c in reversed(sequence)])
-    return "".join([MAP[c] for c in sequence])
-
-def count_bases(sequence):
-    counts = {'A': 0, 'C': 0, 'G': 0, 'T': 0, 'Others': 0}
-    total_chars = len(sequence)
-    others_count = 0
-    max_percentage = 0
-    for char in sequence:
-        if char in counts:
-            counts[char] += 1
-        else:
-            counts['Others'] += 1
-    for char, count in counts.items():
-        percentage = (count / total_chars) * 100
-        if percentage > 0 and char == 'Others':
-            # pdb.set_trace()
-            max_percentage = max(percentage, max_percentage)
-            print(f"{char}: {percentage:.2f}%, sequence = {sequence}")
-            others_count += 1
-    return others_count, max_percentage
-
-"""
-Transform a dna sequence to k-mer string
+Transform a rna sequence to k-mer string
 """
 def generate_kmer_str(sequence: str, k: int) -> str:
-    """Generate k-mer string from DNA sequence."""
+    """Generate k-mer string from rna sequence."""
     return " ".join([sequence[i:i+k] for i in range(len(sequence) - k + 1)])
 
 
@@ -247,10 +209,6 @@ class SupervisedDataset(Dataset):
             for i in range(1,kmer-1):
                 self.weight_mask[:,i+1]=self.weight_mask[:,-i-2]=1/(i+1) 
             self.weight_mask[:, kmer:-kmer] = 1/kmer
-        # if args.token_type == '6mer':
-        #     for i in range(1,5):
-        #         self.weight_mask[:,i+1]=self.weight_mask[:,-i-2]=1/(i+1) 
-        #     self.weight_mask[:, 6:-6] = 1/6
         self.post_token_length = torch.zeros(self.attention_mask.shape)
         if args.token_type == 'bpe' or args.token_type == 'non-overlap':
             self.post_token_length = bpe_position(texts,self.attention_mask,tokenizer)
@@ -283,11 +241,7 @@ class DataCollatorForSupervisedDataset(object):
         post_token_length = torch.stack(post_token_length)
         labels = torch.tensor(np.array(labels))
         struct = torch.tensor(np.array(struct))
-        #print(struct)
-        #print(labels.shape,struct.shape)
         label_mask = struct == -1
-        #print("Label mask shape:", label_mask.shape) 
-        #print(labels[label_mask].shape)
         return dict(
             input_ids=input_ids,
             labels=labels[label_mask],
@@ -373,28 +327,28 @@ def train():
     if training_args.model_type == 'rnalm':
         if training_args.train_from_scratch:
             print('Train from scratch')
-            config = RNALMConfig.from_pretrained(model_args.model_name_or_path,
+            config = RnaLmConfig.from_pretrained(model_args.model_name_or_path,
                 num_labels=train_dataset.num_labels,
                 problem_type="regression",
                 token_type=training_args.token_type,
                 attn_implementation=training_args.attn_implementation,
                 )
             print(config)
-            model =  RNALMForStructuralimputation(
+            model =  RnaLmForStructuralimputation(
                 config,
                 tokenizer=tokenizer,          
                 )
         else:
             print(f'Loading {training_args.model_type} model')
             print(train_dataset.num_labels)
-            model =  RNALMForStructuralimputation.from_pretrained(
+            model =  RnaLmForStructuralimputation.from_pretrained(
                 model_args.model_name_or_path,
-                #config = config,
                 cache_dir=training_args.cache_dir,
                 num_labels=train_dataset.num_labels,
-                #trust_remote_code=True,
+                trust_remote_code=True,
                 problem_type="regression",
                 token_type=training_args.token_type,
+                attn_implementation=training_args.attn_implementation,
                 tokenizer=tokenizer,
                 )
     elif training_args.model_type == 'rna-fm':      

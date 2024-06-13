@@ -28,8 +28,8 @@ current_path = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_path)
 sys.path.append(parent_dir)
 from transformers import Trainer, TrainingArguments, BertTokenizer,EsmTokenizer, EsmModel, AutoConfig, AutoModel, EarlyStoppingCallback
-from model.rnalm.modeling_rnalm import RNALMForNucleotideLevel
-from model.rnalm.rnalm_config import RNALMConfig
+from model.rnalm.modeling_rnalm import RnaLmForNucleotideLevel
+from model.rnalm.rnalm_config import RnaLmConfig
 from model.rnafm.modeling_rnafm import RnaFmForNucleotideLevel
 from model.rnabert.modeling_rnabert import RnaBertForNucleotideLevel
 from model.rnamsm.modeling_rnamsm import RnaMsmForNucleotideLevel
@@ -48,7 +48,7 @@ class ModelArguments:
     lora_alpha: int = field(default=32, metadata={"help": "alpha for LoRA"})
     lora_dropout: float = field(default=0.05, metadata={"help": "dropout rate for LoRA"})
     lora_target_modules: str = field(default="query,value", metadata={"help": "where to perform LoRA"})
-    tokenizer_name_or_path: Optional[str] = field(default="zhihan1996/DNABERT-2-117M")
+    tokenizer_name_or_path: Optional[str] = field(default="")
 
 
 @dataclass
@@ -78,7 +78,6 @@ class TrainingArguments(transformers.TrainingArguments):
     weight_decay: float = field(default=0.01)
     learning_rate: float = field(default=1e-4)
     save_total_limit: int = field(default=1)
-    #lr_scheduler_type: str = field(default="cosine_with_restarts")
     load_best_model_at_end: bool = field(default=True)
     output_dir: str = field(default="output")
     find_unused_parameters: bool = field(default=False)
@@ -91,12 +90,13 @@ class TrainingArguments(transformers.TrainingArguments):
     metric_for_best_model : str = field(default="mcrmse")
     greater_is_better: bool = field(default=False)
     stage: str = field(default='0')
-    model_type: str = field(default='dna')
+    model_type: str = field(default='rna')
     token_type: str = field(default='6mer')
     train_from_scratch: bool = field(default=False)
     log_dir: str = field(default="output")
     attn_implementation: str = field(default="eager")
-
+    dataloader_num_workers: int = field(default=4)
+    dataloader_prefetch_factor: int = field(default=2)
 
 
 def set_seed(args):
@@ -116,56 +116,20 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
         del state_dict
         trainer._save(output_dir, state_dict=cpu_state_dict)  # noqa
 
-def remove_non_acgt_chars(sequence):
-    pattern = '[^ACGT]'
-    cleaned_sequence = re.sub(pattern, '', sequence)
-    return cleaned_sequence
-
-def replace_consecutive_ns(sequence, n=10):
-    pattern = 'N' * n + '+'
-    return re.sub(pattern, 'N', sequence)
-
 
 """
-Get the reversed complement of the original DNA sequence.
-"""
-def get_alter_of_dna_sequence(sequence: str):
-    MAP = {"A": "T", "T": "A", "C": "G", "G": "C"}
-    # return "".join([MAP[c] for c in reversed(sequence)])
-    return "".join([MAP[c] for c in sequence])
-
-def count_bases(sequence):
-    counts = {'A': 0, 'C': 0, 'G': 0, 'T': 0, 'Others': 0}
-    total_chars = len(sequence)
-    others_count = 0
-    max_percentage = 0
-    for char in sequence:
-        if char in counts:
-            counts[char] += 1
-        else:
-            counts['Others'] += 1
-    for char, count in counts.items():
-        percentage = (count / total_chars) * 100
-        if percentage > 0 and char == 'Others':
-            # pdb.set_trace()
-            max_percentage = max(percentage, max_percentage)
-            print(f"{char}: {percentage:.2f}%, sequence = {sequence}")
-            others_count += 1
-    return others_count, max_percentage
-
-"""
-Transform a dna sequence to k-mer string
+Transform a sequence to k-mer string
 """
 def generate_kmer_str(sequence: str, k: int) -> str:
-    """Generate k-mer string from DNA sequence."""
+    """Generate k-mer string from    sequence."""
     return " ".join([sequence[i:i+k] for i in range(len(sequence) - k + 1)])
 
 
 """
-Load or generate k-mer string for each DNA sequence. The generated k-mer string will be saved to the same directory as the original data with the same name but with a suffix of "_{k}mer".
+Load or generate k-mer string for each    sequence. The generated k-mer string will be saved to the same directory as the original data with the same name but with a suffix of "_{k}mer".
 """
 def load_or_generate_kmer(data_path: str, texts: List[str], k: int, is_test_set=None) -> List[str]:
-    """Load or generate k-mer string for each DNA sequence."""
+    """Load or generate k-mer string for each    sequence."""
     if is_test_set == 'public' or is_test_set == 'private':
         kmer_path = data_path.replace(".json", f"{is_test_set}_{k}mer.json")
     else:
@@ -186,8 +150,6 @@ def load_or_generate_kmer(data_path: str, texts: List[str], k: int, is_test_set=
 
 def bpe_position(texts,attn_mask, tokenizer):
     position_id = torch.zeros(attn_mask.shape)
-    # print(texts[0])
-    # print(tokenizer.tokenize(texts[0]))
     for i,text in enumerate(texts):   
         text = tokenizer.tokenize(text)
         position_id[:, 0] = 1 #[cls]
@@ -195,8 +157,6 @@ def bpe_position(texts,attn_mask, tokenizer):
         for j, token in enumerate(text):
             index = j+1
             position_id[i,index] = len(token) #start after [cls]   
-            # if i == 0:
-            #     print(token,position_id[i,index],i,index,len(token))
         position_id[i, index+1] = 1 #[sep]
         
     print(position_id[0,:])
@@ -220,11 +180,8 @@ class SupervisedDataset(Dataset):
             self.y = np.stack([np.stack(self.df[col].values) for col in deg_cols], axis=-1)
         print('post',self.df.shape)
         self.sample_ids = self.df['id'].values
-        #self.X = np.stack(self.df['train_tensor'].values)
-        #texts = self.df['sequence'].values
         texts = [d.upper().replace("U", "T") for d in self.df['sequence']]
                
-        #self.id_to_bp_mat_map = self.load_bp_mats()
         seq_length = len(texts[0])
         if kmer != -1:
             # only write file on the first process
@@ -256,7 +213,6 @@ class SupervisedDataset(Dataset):
         self.weight_mask = torch.ones((self.input_ids.shape[0],seq_length+2))
 
         self.attention_mask = output["attention_mask"]
-        #print(self.attention_mask[0])
         if 'mer' in args.token_type:
             for i in range(1,kmer-1):
                 self.weight_mask[:,i+1]=self.weight_mask[:,-i-2]=1/(i+1) 
@@ -266,12 +222,10 @@ class SupervisedDataset(Dataset):
             self.post_token_length = bpe_position(self.texts,self.attention_mask,tokenizer)
         self.num_labels = 3
     def __getitem__(self, index: int):
-        if self.is_test:
-            #print(self.sample_ids.shape,self.input_ids.shape,self.attention_mask.shape)
+        if self.is_test:          
             sample_id = self.sample_ids[index]
             return dict(input_ids=self.input_ids[index], sample_ids=sample_id, attention_mask=self.attention_mask[index],
                 weight_mask=self.weight_mask[index],post_token_length=self.post_token_length[index])
-        #print('self.texts[index]',self.texts[index])
         targets = torch.tensor(self.y[index, :, :], dtype=torch.float32)
         return dict(input_ids=self.input_ids[index], labels=targets, attention_mask=self.attention_mask[index],
            weight_mask=self.weight_mask[index],post_token_length=self.post_token_length[index])
@@ -291,7 +245,6 @@ class TestDataCollatorForSupervisedDataset(object):
         attention_mask = torch.stack(attention_mask)
         weight_mask = torch.stack(weight_mask)
         post_token_length = torch.stack(post_token_length)
-        #attention_mask = torch.cat([attention_mask,weight_mask,post_token_length],dim=1)
         
         return dict(
             input_ids=input_ids,
@@ -307,17 +260,12 @@ class DataCollatorForSupervisedDataset(object):
     tokenizer: transformers.PreTrainedTokenizer
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        #print(instances)
         input_ids, labels, attention_mask, weight_mask, post_token_length  = tuple([instance[key] for instance in instances] for key in ("input_ids" ,"labels", "attention_mask","weight_mask","post_token_length"))
         input_ids = torch.stack(input_ids)
         labels = torch.stack(labels)
         attention_mask = torch.stack(attention_mask)
         weight_mask = torch.stack(weight_mask)
         post_token_length = torch.stack(post_token_length)
-        #print(input_ids.shape,post_token_length.shape)
-        #print(weight_mask.shape,attention_mask.shape,labels.shape)
-        #attention_mask = torch.cat([attention_mask,weight_mask,post_token_length],dim=1)
-        #print(weight_mask.shape,attention_mask.shape,labels.shape)
         return dict(
             input_ids=input_ids,
             labels=labels,
@@ -328,14 +276,9 @@ class DataCollatorForSupervisedDataset(object):
 
 def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
     def rmse(labels,logits):
-        #print('rmse',labels.shape,logits.shape)
         return np.mean(np.square(labels - logits + 1e-6))
-    #logits = logits[:, 1:1+labels.shape[1], :]
-    #print(logits.shape)
-    #print(logits.shape[2])     
     score = 0
     num_scored = 3
-    #print('mcrmse',labels.shape,logits.shape)
     for i in range(num_scored):
         score += rmse(labels[:, :, i], logits[:, :, i]) / num_scored       
     return {
@@ -343,14 +286,12 @@ def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
     }
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
-    #print(logits.shape,labels.shape)
     return calculate_metric_with_sklearn(logits, labels)
 
 def build_submission_df(ids, pred_tensor):
     if type(pred_tensor).__module__ != np.__name__:
         pred_tensor = pred_tensor.cpu().detach().numpy()
     res = []
-    #print(ids)
     for i, id in enumerate(ids):
         
         for j, pred in enumerate(pred_tensor[i, :, :]):
@@ -371,10 +312,7 @@ def make_pred_file(args, model, loaders, postfix=''):
             post_token_length = batch["post_token_length"].to(args.device)
             with torch.no_grad():
                 test_pred = model(input_ids=input_ids, attention_mask=attention_mask,weight_mask=weight_mask, post_token_length=post_token_length)
-                # print(len(outputs))
-                #print(test_pred[0].shape)
                 test_pred = test_pred[0][:, 1:-1,:] #exclude [cls] and [sep]
-                #print(test_pred.shape)
                 res += build_submission_df(sample_ids, test_pred)
 
     pred_df = pd.DataFrame(res, columns=['id_seqpos', 'reactivity', 'deg_Mg_pH10', 'deg_Mg_50C'])
@@ -439,7 +377,7 @@ def train():
         if training_args.train_from_scratch:
             
             print('Train from scratch')
-            config = RNALMConfig.from_pretrained(model_args.model_name_or_path,
+            config = RnaLmConfig.from_pretrained(model_args.model_name_or_path,
                 num_labels=train_dataset.num_labels,
                 problem_type="regression",
                 token_type=training_args.token_type,
@@ -447,21 +385,21 @@ def train():
                 
                 )
             print(config)
-            model =  RNALMForNucleotideLevel(
+            model =  RnaLmForNucleotideLevel(
                 config,
                 tokenizer=tokenizer,
                 )
         else:
             print('Loading rnalm model')  
             print(train_dataset.num_labels)
-            model =  RNALMForNucleotideLevel.from_pretrained(
+            model =  RnaLmForNucleotideLevel.from_pretrained(
                 model_args.model_name_or_path,
-                #config = config,
                 cache_dir=training_args.cache_dir,
                 num_labels=train_dataset.num_labels,
-                #trust_remote_code=True,
+                trust_remote_code=True,
                 problem_type="regression",
                 token_type=training_args.token_type,
+                attn_implementation=training_args.attn_implementation,
                 )
             
     elif training_args.model_type == 'rna-fm':      
@@ -536,24 +474,7 @@ def train():
             token_type=training_args.token_type,
             tokenizer=tokenizer,
         )     
-   
-    elif training_args.model_type == 'dnabert2':
-        if training_args.train_from_scratch:
-            pass
-        else:
-            print('Loading dnabert2 model')          
-            print(train_dataset.num_labels)
-            model = DNABERT2ForRNAdegra.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                num_labels=train_dataset.num_labels,
-                trust_remote_code=True,
-                use_alibi=model_args.use_alibi,
-                problem_type="regression",
-                token_type=training_args.token_type,
-                tokenizer=tokenizer,
-            )
-    
+       
 
     trainer = transformers.Trainer(model=model,
                                    tokenizer=tokenizer,
@@ -570,9 +491,7 @@ def train():
         trainer.save_state()
         safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
    
-    # test_data_path = '/mnt/data/oss_beijing/multi-omics/RNA/downstream/degradation/train-val-test/test_1.json'
-    # test_data_loader1 = dataset_loader(test_data_path, test_set='public', batch_size=batch_size)
-    # test_data_loader2 = dataset_loader(test_data_path, test_set='private', batch_size=batch_size)
+   
     def test_dataset_loader(dataset, args):
         return DataLoader(
             dataset,
@@ -589,4 +508,4 @@ if __name__ == "__main__":
 
 #how to get score:
 #submit to kaggle with command like
-#kaggle competitions submit -c stanford-covid-vaccine -f /mnt/data/oss_beijing/renyuchen/temp/ft/rna-all/degra/dna/open/dnabert1/results/dnabert_seed42/submission_dnabert1.csv -m "Message"
+#kaggle competitions submit -c stanford-covid-vaccine -f xxx/submission_yyy.csv -m "Message"

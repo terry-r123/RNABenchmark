@@ -41,8 +41,6 @@ def set_seed(args):
 
 def bpe_position(texts,attn_mask, tokenizer):
     position_id = torch.zeros(attn_mask.shape)
-    # print(texts[0])
-    # print(tokenizer.tokenize(texts[0]))
     for i,text in enumerate(texts):   
         text = tokenizer.tokenize(text)
         position_id[:, 0] = 1
@@ -50,12 +48,7 @@ def bpe_position(texts,attn_mask, tokenizer):
         for j, token in enumerate(text):
             index = j+1
             position_id[i,index] = len(token) #start after [cls]   
-            # if i == 0:
-            #     print(token,position_id[i,index],i,index,len(token))
         position_id[i, index+1] = 1
-        
-    #print(position_id[0,:])
-    #print('position_id.shape',position_id.shape)
     return position_id
 
 def calculate_metric_with_sklearn(logits_list: [np.ndarray], labels_list: [np.ndarray]):
@@ -70,28 +63,16 @@ def calculate_metric_with_sklearn(logits_list: [np.ndarray], labels_list: [np.nd
     top_L_5_FP = []
     top_L_10_TP = []
     top_L_10_FP = []
-    #print('labels_list',labels_list)
     lengths = np.array([labels.shape[-1] for labels in labels_list])
-    #print('lengths',lengths)
     long_range_mask = np.zeros((lengths.max(), lengths.max()))
-    #print(long_range_mask.shape)
     long_range_mask[np.triu_indices(long_range_mask.shape[0], k=23)] = 1
-    #print(long_range_mask.shape)
     # make it boolean
     long_range_mask = long_range_mask.astype(bool)
-    #print(long_range_mask.shape)
-    #print(len(labels_list))
     for logits, labels in zip(logits_list, labels_list):
         labels = labels.squeeze().astype(float)
-        #print(labels.shape)
         logits = logits.squeeze()
-        #print(logits.shape)
         logits = (logits + logits.T) / 2 # symmetrize the logits, we only consider the upper triangle
-        #print(logits.shape)
         predictions = scipy.special.expit(logits)
-        #print(predictions.shape)
-        #print('labels',labels)
-        #print(long_range_mask.shape,labels.shape)
         long_range_mask_tmp = long_range_mask[:labels.shape[-1], :labels.shape[-1]]
         # long range only
         long_range_labels = labels[long_range_mask_tmp].flatten()
@@ -158,7 +139,6 @@ class collator():
         data_dict = self.tokenizer(seqs, 
                         padding='longest', 
                         max_length=self.tokenizer.model_max_length, 
-                        #add_special_tokens=False,
                         truncation=True, 
                         return_tensors='pt')
         post_token_length = torch.zeros(data_dict['attention_mask'].shape)
@@ -168,7 +148,6 @@ class collator():
         input_ids = data_dict["input_ids"]  
 
         # each elemenet in struct is a square matrix, but with different shape. We need to pad them to make them the same shape
-        #struct =  np.array( [np.pad(x, ((1,max_len-1-x.shape[0]),(1,max_len-1-x.shape[1])), 'constant', constant_values=-1) for x in struct])
         struct =  np.array( [np.pad(x, ((0,max_len-x.shape[0]),(0,max_len-x.shape[1])), 'constant', constant_values=-1) for x in struct])
         struct = torch.tensor(struct)
 
@@ -182,7 +161,6 @@ def test(model, test_loader, accelerator):
     model.eval()  # Set the model to evaluation mode
     outputs_list = []
     targets_list = []
-    #test_loss_list = []
     with torch.no_grad(): 
         for data_dict in tqdm(test_loader):
             for key in data_dict:
@@ -190,19 +168,11 @@ def test(model, test_loader, accelerator):
 
             logits = model(data_dict)[:,1:-1,1:-1]
             labels = data_dict['struct']
-            #print(labels.shape)
             label_mask = labels != -1
-            outputs_list.append(logits.detach().cpu().numpy())#.reshape(-1,1))
-            targets_list.append(labels.detach().cpu().numpy())#.reshape(-1,1))
-            #print(logits.shape,labels.shape)
-            #loss = criterion(logits[label_mask].reshape(-1,1), labels[label_mask].reshape(-1,1))
-            #test_loss_list.append(loss.item())
-        #logits = np.concatenate(outputs_list,axis = 0)
-        #labels = np.concatenate(targets_list,axis = 0)
-    #print('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
-    #print(len(outputs_list))
+            outputs_list.append(logits.detach().cpu().numpy())
+            targets_list.append(labels.detach().cpu().numpy())
+            
     metrics = calculate_metric_with_sklearn(outputs_list, targets_list)
-    #print('yyyyyyyyyyyyyyyyyyyyyyyyyyyy')
     print(f'\nTest: Top-l precision: {metrics["top_l_precision"]}, Top-l/2 precision: {metrics["top_l/2_precision"]}, Top-l/5 precision: {metrics["top_l/5_precision"]}, Top-l/10 precision: {metrics["top_l/10_precision"]}')
     return metrics
 
@@ -213,7 +183,7 @@ def main(args):
                               gradient_accumulation_steps=args.gradient_accumulation_steps,
                               log_with='wandb')
     model_name = args.output_dir.split('/')[-1]
-    #model_name = args.model_name_or_path.split('/')[-1]
+
     name = f'[RNA_Secondary_Structure_Prediction]{model_name}_' \
            f'{args.model_type}_' \
            f'{args.token_type}_' \
@@ -227,23 +197,13 @@ def main(args):
 
     if args.is_freeze:
         name += '_freeze'
-
-    #args.pdb_dir = f'{args.data_dir}/RNA_Secondary_Structure_Prediction/PDB_SS'
-    #args.bprna_dir = f'{args.data_dir}/bpRNA'
-
-    # ckpt_path = os.path.join(args.output_dir, name)
-    # os.makedirs(ckpt_path, exist_ok=True)
-
-    
-    
-
+ 
     model_config = extractor.config
     model = SSCNNPredictor(args, extractor, model_config, tokenizer, args.is_freeze)
     num_params = count_parameters(model)
-    #print(model)
+
     print(f"model params are: {num_params}")
-    #if args.mode == 'bprna':
-        ## bprna data ##
+
     
     train_dataset = ContactMapDataset(data_path=os.path.join(args.data_path, args.data_train_path), tokenizer=tokenizer, args=args)
     val_dataset = ContactMapDataset(data_path=os.path.join(args.data_path, args.data_val_path), tokenizer=tokenizer, args=args)
@@ -255,11 +215,6 @@ def main(args):
         test_dataset = ContactMapDataset(data_path=os.path.join(args.data_path, data_test_name), tokenizer=tokenizer, args=args)
         test_dataset_list.append(test_dataset)
     
-    # test_dataset1 = ContactMapDataset(data_path=os.path.join(args.data_path, "test/rna_sequences.csv"), tokenizer=tokenizer, args=args)
-    # test_dataset2 = ContactMapDataset(data_path=os.path.join(args.data_path, "DIRECT/rna_sequences.csv"), tokenizer=tokenizer, args=args)
-    # test_dataset3 = ContactMapDataset(data_path=os.path.join(args.data_path, "RFAM19/rna_sequences.csv"), tokenizer=tokenizer, args=args)
-
-
     
     print(f'# train: {len(train_dataset)},val:{len(val_dataset)},test:{len(test_dataset_list[0])}+{len(test_dataset_list[1])}+{len(test_dataset_list[2])}')
     collate_fn = collator(tokenizer,args)
@@ -272,12 +227,6 @@ def main(args):
         test_loader = DataLoader(test_dataset, batch_size=args.per_device_eval_batch_size, shuffle=False, num_workers=args.num_workers,
                              collate_fn=collate_fn)
         test_dataloader_list.append(test_loader)                     
-    # test_loader1 = DataLoader(test_dataset1, batch_size=args.per_device_eval_batch_size, shuffle=False, num_workers=args.num_workers,
-    #                          collate_fn=collate_fn)
-    # test_loader2 = DataLoader(test_dataset2, batch_size=args.per_device_eval_batch_size, shuffle=False, num_workers=args.num_workers,
-    #                          collate_fn=collate_fn)
-    # test_loader3 = DataLoader(test_dataset3, batch_size=args.per_device_eval_batch_size, shuffle=False, num_workers=args.num_workers,
-    #                          collate_fn=collate_fn)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
@@ -294,7 +243,7 @@ def main(args):
     model, optimizer, train_loader, scheduler = accelerator.prepare(model, optimizer, train_loader, lr_scheduler)
 
     if accelerator.is_main_process:
-        wandb.init(project='ContactMap')
+        wandb.init(project='ContactMap', mode='offline')
         wandb.run.name = name
         wandb.run.save()
         wandb.watch(model)
@@ -315,15 +264,10 @@ def main(args):
         start_time = time.time()
         for data_dict in tqdm(train_loader):
             with accelerator.accumulate(model):
-                logits = model(data_dict)[:,1:-1,1:-1]
-                #print(logits.shape)
-                
+                logits = model(data_dict)[:,1:-1,1:-1]               
                 labels = data_dict['struct']
-                #print('label',labels.shape)
-                #print('logits',logits.shape)
                 label_mask = labels != -1 
                 loss = criterion(logits[label_mask].reshape(-1,1), labels[label_mask].reshape(-1,1))
-                #print(loss)
                 accelerator.backward(loss)
                 optimizer.step()
                 optimizer.zero_grad()
@@ -341,24 +285,6 @@ def main(args):
         threshold = 0.5
         print(f"epoch {epoch}:")
         val_metrics = test(model, val_loader, accelerator)
-        # with torch.no_grad():
-        #     model.eval()
-        #     outputs_list = []
-        #     targets_list = []
-        #     for data_dict in tqdm(val_loader):
-        #         for key in data_dict:
-        #             data_dict[key] = data_dict[key].to(accelerator.device)
-        #         logits = model(data_dict)
-        #         labels = data_dict['struct']
-        #         label_mask = labels != -1
-        #         outputs_list.append(logits[label_mask].detach().cpu().numpy().reshape(-1,1))
-        #         targets_list.append(labels[label_mask].detach().cpu().numpy().reshape(-1,1))
-        #         loss = criterion(logits[label_mask].reshape(-1,1), labels[label_mask].reshape(-1,1))
-        #         val_loss_list.append(loss.item())
-        #     logits = np.concatenate(outputs_list,axis = 0)
-        #     labels = np.concatenate(targets_list,axis = 0)
-        #     val_metrics = calculate_metric_with_sklearn(logits, labels)
-        #     print(f'\nVal: Top-l precision: {val_metrics["top_l_precision"]}, Top-l/2 precision: {val_metrics["top_l/2_precision"]}, Top-l/5 precision: {val_metrics["top_l/5_precision"]}, Top-l/10 precision: {val_metrics["top_l/10_precision"]}')
 
         if best_val < val_metrics["top_l_precision"]:
             best_val = val_metrics["top_l_precision"] 
@@ -382,10 +308,6 @@ def main(args):
         if accelerator.is_main_process:
             print(
                 f'epoch: {epoch}, lr: {optimizer.param_groups[0]["lr"]}, train_loss: {np.mean(train_loss_list):.6f}, time: {end_time - start_time:.2f}')
-            # print(
-            #     f'[VL0] Loss: {np.mean(val_loss_list)}, Top-l precision: {val_metrics["top_l_precision"]}, Top-l/2 precision: {val_metrics["top_l/2_precision"]}, Top-l/5 precision: {val_metrics["top_l/5_precision"]}, Top-l/10 precision: {val_metrics["top_l/10_precision"]}')
-            # print(
-            #     f'[TS0] loss: {np.mean(test_loss_list)}, Top-l precision: {test_metrics["top_l_precision"]}, Top-l/2 precision: {test_metrics["top_l/2_precision"]}, Top-l/5 precision: {test_metrics["top_l/5_precision"]}, Top-l/10 precision: {test_metrics["top_l/10_precision"]}')
             log_dict = {'lr': optimizer.param_groups[0]["lr"], 'train_loss': np.mean(train_loss_list)}
             log_dict.update(val_metrics)
             for test_metrics in best_test:
@@ -417,23 +339,22 @@ if __name__ == "__main__":
     parser.add_argument('--model_scale', type=str, default='8m')
     parser.add_argument('--is_freeze', type=bool, default=False)
     parser.add_argument('--mode', type=str, default='bprna')
-
-    parser.add_argument("--pretrained_lm_dir", type=str, default='/public/home/taoshen/data/rna/mars_fm_data/mars_esm_preckpts')
-    parser.add_argument('--data_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
+    parser.add_argument("--pretrained_lm_dir", type=str, default='')
+    parser.add_argument('--data_path', default= '')
     parser.add_argument('--model_name_or_path', default='output')
     parser.add_argument('--output_dir', default='./ckpts/')
-    parser.add_argument('--model_type', type=str, default='esm') # esm, esm-protein, dna
+    parser.add_argument('--model_type', type=str, default='rna')
     parser.add_argument('--model_max_length', type=int, default=512)
-    parser.add_argument('--bprna_dir', default='/mnt/data/ai4bio/rna/downstream/Secondary_structure_prediction/esm_data/')
+    parser.add_argument('--bprna_dir', default='')
     parser.add_argument('--run_name', type=str, default="run")
     parser.add_argument('--token_type', type=str, default=None)
     parser.add_argument('--cache_dir', type=str, default=None)
     parser.add_argument('--train_from_scratch', type=bool, default=False)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--patience', type=int, default=3)
-    parser.add_argument('--data_train_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
-    parser.add_argument('--data_val_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
-    parser.add_argument('--data_test_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
+    parser.add_argument('--data_train_path', default= '')
+    parser.add_argument('--data_val_path', default= '')
+    parser.add_argument('--data_test_path', default= '')
     parser.add_argument('--attn_implementation', type=str, default="eager")
     args = parser.parse_args()
 

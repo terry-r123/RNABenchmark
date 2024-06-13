@@ -213,29 +213,21 @@ class ResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def _forward_impl(self, x: Tensor) -> Tensor:
-        # See note [TorchScript super()]
         # [bz,hd,len,len]
-        #print('x1',x.shape)
         x = self.conv1(x)
         # [bz,hd/10,len,len]
-        #print('x2',x.shape)
         x = self.layer1(x)
         # [bz,hd/10,len,len]
-        #print('x3',x.shape)
         # [bz, len, len, hd/10]
         x = x.permute(0, 2, 3, 1)
-        #print('x4',x.shape)
         x = self.bn1(x)
         # [bz, hd/10, len, len]
         x = x.permute(0, 3, 1, 2)
-        #print('x5',x.shape)
         x = self.relu(x)
         # [bz, len, len, hd/10]
         x = x.permute(0, 2, 3, 1)
-        #print('x6',x.shape)
         # [bz, len, len ,1]
         x = self.fc1(x)
-        #print('x7',x.shape)
         return x
 
     def forward(self, x: Tensor) -> Tensor:

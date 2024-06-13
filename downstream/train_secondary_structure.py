@@ -76,7 +76,6 @@ class collator():
         struct = [x['struct'] for x in batch]
      
         max_len = max([len(seq) for seq in seqs])
-        #max_len = min(max_len, self.tokenizer.model_max_length)
 
         weight_mask = torch.ones((len(seqs), max_len+2)) #including [cls] and [sep], dim= [bz, max_len+2]
         if 'mer' in self.args.token_type:
@@ -98,7 +97,6 @@ class collator():
         input_ids = data_dict["input_ids"]  
 
         # each elemenet in struct is a square matrix, but with different shape. We need to pad them to make them the same shape
-        #struct =  np.array( [np.pad(x, ((1,max_len-1-x.shape[0]),(1,max_len-1-x.shape[1])), 'constant', constant_values=-1) for x in struct])
         struct =  np.array( [np.pad(x, ((0,max_len-x.shape[0]),(0,max_len-x.shape[1])), 'constant', constant_values=-1) for x in struct])
         struct = torch.tensor(struct)
 
@@ -112,7 +110,6 @@ def test(model, test_loader, accelerator):
     model.eval()  # Set the model to evaluation mode
     outputs_list = []
     targets_list = []
-    #test_loss_list = []
     with torch.no_grad(): 
         for data_dict in tqdm(test_loader):
             for key in data_dict:
@@ -120,17 +117,12 @@ def test(model, test_loader, accelerator):
 
             logits = model(data_dict)[:,1:-1,1:-1]
             labels = data_dict['struct']
-            #print(labels.shape)
             label_mask = labels != -1
             outputs_list.append(logits.detach().cpu().numpy().reshape(-1,1))
             targets_list.append(labels.detach().cpu().numpy().reshape(-1,1))
-            #print(logits.shape,labels.shape)
-            #loss = criterion(logits[label_mask].reshape(-1,1), labels[label_mask].reshape(-1,1))
-            #test_loss_list.append(loss.item())
         logits = np.concatenate(outputs_list,axis = 0)
         labels = np.concatenate(targets_list,axis = 0)
     
-    #print(len(outputs_list))
     metrics = calculate_metric_with_sklearn(logits, labels)
     
     print(f'\nTest: Precision: {metrics["precision"]}, Recall: {metrics["recall"]}, F1: {metrics["f1"]}')
@@ -143,7 +135,6 @@ def main(args):
                               gradient_accumulation_steps=args.gradient_accumulation_steps,
                               log_with='wandb')
     model_name = args.output_dir.split('/')[-1]
-    #model_name = args.model_name_or_path.split('/')[-1]
     name = f'[RNA_Secondary_Structure_Prediction]{model_name}_' \
            f'{args.model_type}_' \
            f'{args.token_type}_' \
@@ -158,22 +149,11 @@ def main(args):
     if args.is_freeze:
         name += '_freeze'
 
-    #args.pdb_dir = f'{args.data_dir}/RNA_Secondary_Structure_Prediction/PDB_SS'
-    #args.bprna_dir = f'{args.data_dir}/bpRNA'
-
-    # ckpt_path = os.path.join(args.output_dir, name)
-    # os.makedirs(ckpt_path, exist_ok=True)
-
-    
-    
-
     model_config = extractor.config
     model = SSCNNPredictor(args, extractor, model_config, tokenizer, args.is_freeze)
     num_params = count_parameters(model)
-    #print(model)
     print(f"model params are: {num_params}")
-    #if args.mode == 'bprna':
-        ## bprna data ##
+
     
     train_dataset = SSDataset(data_path=args.data_path, tokenizer=tokenizer, args=args, mode='train')
     val_dataset = SSDataset(data_path=args.data_path, tokenizer=tokenizer, args=args, mode='val')
@@ -207,7 +187,7 @@ def main(args):
     model, optimizer, train_loader, scheduler = accelerator.prepare(model, optimizer, train_loader, lr_scheduler)
 
     if accelerator.is_main_process:
-        wandb.init(project='SecondaryStructure')
+        wandb.init(project='SecondaryStructure', mode='offline')
         wandb.run.name = name
         wandb.run.save()
         wandb.watch(model)
@@ -230,11 +210,8 @@ def main(args):
             with accelerator.accumulate(model):
                 logits = model(data_dict)[:,1:-1,1:-1]
                 labels = data_dict['struct']
-                #print('label',labels.shape)
-                #print('logits',logits.shape)
                 label_mask = labels != -1 
                 loss = criterion(logits[label_mask].reshape(-1,1), labels[label_mask].reshape(-1,1))
-                #print('loss',loss)
                 accelerator.backward(loss)
                 optimizer.step()
                 optimizer.zero_grad()
@@ -306,22 +283,22 @@ if __name__ == "__main__":
     parser.add_argument('--is_freeze', type=bool, default=False)
     parser.add_argument('--mode', type=str, default='bprna')
 
-    parser.add_argument("--pretrained_lm_dir", type=str, default='/public/home/taoshen/data/rna/mars_fm_data/mars_esm_preckpts')
-    parser.add_argument('--data_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
+    parser.add_argument("--pretrained_lm_dir", type=str, default='')
+    parser.add_argument('--data_path', default= '')
     parser.add_argument('--model_name_or_path', default='output')
     parser.add_argument('--output_dir', default='./ckpts/')
-    parser.add_argument('--model_type', type=str, default='esm') # esm, esm-protein, dna
+    parser.add_argument('--model_type', type=str, default='rna')
     parser.add_argument('--model_max_length', type=int, default=512)
-    parser.add_argument('--bprna_dir', default='/mnt/data/ai4bio/rna/downstream/Secondary_structure_prediction/esm_data/')
+    parser.add_argument('--bprna_dir', default='')
     parser.add_argument('--run_name', type=str, default="run")
     parser.add_argument('--token_type', type=str, default=None)
     parser.add_argument('--cache_dir', type=str, default=None)
     parser.add_argument('--train_from_scratch', type=bool, default=False)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--patience', type=int, default=3)
-    parser.add_argument('--data_train_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
-    parser.add_argument('--data_val_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
-    parser.add_argument('--data_test_path', default= '/public/home/taoshen/data/rna/mars_fm_data/downstream')
+    parser.add_argument('--data_train_path', default= '')
+    parser.add_argument('--data_val_path', default= '')
+    parser.add_argument('--data_test_path', default= '')
     parser.add_argument('--attn_implementation', type=str, default="eager")
     args = parser.parse_args()
 

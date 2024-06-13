@@ -26,10 +26,8 @@ current_path = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_path)
 sys.path.append(parent_dir)
 
-from model.rnalm.modeling_rnalm import RNALMForSequenceClassification
-from model.rnalm.rnalm_config import RNALMConfig
-from model.esm.modeling_esm import EsmForSequenceClassification
-from model.esm.esm_config import EsmConfig
+from model.rnalm.modeling_rnalm import RnaLmForSequenceClassification
+from model.rnalm.rnalm_config import RnaLmConfig
 from model.rnafm.modeling_rnafm import RnaFmForSequenceClassification
 from model.rnabert.modeling_rnabert import RnaBertForSequenceClassification
 from model.rnamsm.modeling_rnamsm import RnaMsmForSequenceClassification
@@ -40,7 +38,7 @@ from tokenizer.tokenization_opensource import OpenRnaLMTokenizer
 early_stopping = EarlyStoppingCallback(early_stopping_patience=20)
 @dataclass
 class ModelArguments:
-    model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
+    model_name_or_path: Optional[str] = field(default="")
     use_lora: bool = field(default=False, metadata={"help": "whether to use LoRA"})
     use_alibi: bool = field(default=True, metadata={"help": "whether to use alibi"})
     use_features: bool = field(default=True, metadata={"help": "whether to use alibi"})
@@ -48,7 +46,7 @@ class ModelArguments:
     lora_alpha: int = field(default=32, metadata={"help": "alpha for LoRA"})
     lora_dropout: float = field(default=0.05, metadata={"help": "dropout rate for LoRA"})
     lora_target_modules: str = field(default="query,value", metadata={"help": "where to perform LoRA"})
-    tokenizer_name_or_path: Optional[str] = field(default="zhihan1996/DNABERT-2-117M")
+    tokenizer_name_or_path: Optional[str] = field(default="")
 
 @dataclass
 class DataArguments:
@@ -88,12 +86,13 @@ class TrainingArguments(transformers.TrainingArguments):
     fp16: bool = field(default=False)
     metric_for_best_model: str = field(default="accuracy")
     stage: str = field(default='0')
-    model_type: str = field(default='dna')
+    model_type: str = field(default='rna')
     token_type: str = field(default='6mer')
     train_from_scratch: bool = field(default=False)
     log_dir: str = field(default="output")
     attn_implementation: str = field(default="eager")
-
+    dataloader_num_workers: int = field(default=4)
+    dataloader_prefetch_factor: int = field(default=2)
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
     """Collects the state dict and dump to disk."""
     state_dict = trainer.model.state_dict()
@@ -110,27 +109,20 @@ def set_seed(args):
         print("!!!!!!!!!!!!!", "Yes")
         torch.cuda.manual_seed_all(args.seed)
 
-"""
-Get the reversed complement of the original DNA sequence.
-"""
-def get_alter_of_dna_sequence(sequence: str):
-    MAP = {"A": "T", "T": "A", "C": "G", "G": "C"}
-    # return "".join([MAP[c] for c in reversed(sequence)])
-    return "".join([MAP[c] for c in sequence])
 
 """
-Transform a dna sequence to k-mer string
+Transform a rna sequence to k-mer string
 """
 def generate_kmer_str(sequence: str, k: int) -> str:
-    """Generate k-mer string from DNA sequence."""
+    """Generate k-mer string from rna sequence."""
     return " ".join([sequence[i:i+k] for i in range(len(sequence) - k + 1)])
 
 
 """
-Load or generate k-mer string for each DNA sequence. The generated k-mer string will be saved to the same directory as the original data with the same name but with a suffix of "_{k}mer".
+Load or generate k-mer string for each rna sequence. The generated k-mer string will be saved to the same directory as the original data with the same name but with a suffix of "_{k}mer".
 """
 def load_or_generate_kmer(data_path: str, texts: List[str], k: int) -> List[str]:
-    """Load or generate k-mer string for each DNA sequence."""
+    """Load or generate k-mer string for each rna sequence."""
     kmer_path = data_path.replace(".csv", f"_{k}mer.json")
     if os.path.exists(kmer_path):
         logging.warning(f"Loading k-mer from {kmer_path}...")
@@ -167,7 +159,6 @@ class SupervisedDataset(Dataset):
             print(len(data[0]))
             raise ValueError("Data format not supported.")
         text = texts[0]
-        #print([text[i : i + kmer] for i in range(len(text) - kmer + 1)])
         
         if kmer != -1:
             # only write file on the first process
@@ -182,23 +173,10 @@ class SupervisedDataset(Dataset):
         # ensure tokenier
         print(type(texts[0]))
         print(texts[0])
-        #print(list(texts[0]))
-        #print(texts[0].split())
-        #print([texts[0]])
         test_example = tokenizer.tokenize(texts[0])
         print(test_example)
         print(len(test_example))
         print(tokenizer(texts[0]))
-        # output = tokenizer(
-        #     texts,
-        #     return_tensors="pt",
-        #     padding="longest",
-        #     max_length=tokenizer.model_max_length,
-        #     truncation=True,
-        # )
-
-        # self.input_ids = output["input_ids"]
-        # self.attention_mask = output["attention_mask"]
         self.labels = labels
         self.num_labels = len(set(labels))
         self.texts = texts
@@ -207,7 +185,6 @@ class SupervisedDataset(Dataset):
        return len(self.texts)
 
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
-        #return dict(input_ids=self.input_ids[i], labels=self.labels[i])
         return dict(input_ids=self.texts[i], labels=self.labels[i])
 
 
@@ -226,9 +203,6 @@ class DataCollatorForSupervisedDataset(object):
         output = self.tokenizer(seqs, padding='longest', max_length=self.tokenizer.model_max_length, truncation=True, return_tensors='pt')
         input_ids = output["input_ids"]
         attention_mask = output["attention_mask"]
-        #attention_mask = input_ids.ne(self.tokenizer.pad_token_id)
-        #print(sum(attention_mask==input_ids.ne(self.tokenizer.pad_token_id)))
-        #print('2',input_ids[0].shape)
         labels = torch.Tensor(labels).long()
         return dict(
             input_ids=input_ids,
@@ -253,19 +227,7 @@ def calculate_metric_with_sklearn(logits: np.ndarray, labels: np.ndarray):
 Compute metrics used for huggingface trainer.
 """
 def compute_metrics(eval_pred):
-    #print(eval_pred)
-    #p.predictions[0] if isinstance(p.predictions, tuple)
     logits, labels = eval_pred
-    # print(logits)
-    # print(labels)
-    # print(len(logits))
-    # print(logits[0].shape)
-    # print(logits[1].shape)
-    
-    # print(labels.shape)
-    # print(logits.shape)
-    #print(type(logits))
-    #print(np.array(logits).shape)
     return calculate_metric_with_sklearn(logits, labels)
 
 def get_parameter_number(model):
@@ -328,60 +290,27 @@ def train():
     if training_args.model_type == 'rnalm':
         if training_args.train_from_scratch:
             print('Train from scratch')
-            config = RNALMConfig.from_pretrained(model_args.model_name_or_path,
+            config = RnaLmConfig.from_pretrained(model_args.model_name_or_path,
                 num_labels=train_dataset.num_labels,
                 token_type=training_args.token_type,
                 problem_type="single_label_classification",
                 attn_implementation=training_args.attn_implementation,
                 )
             print(config)
-            model =  RNALMForSequenceClassification(
+            model =  RnaLmForSequenceClassification(
                 config,
                 )
         else:
             print('Loading rnalm model')
             print(train_dataset.num_labels)
-            model =  RNALMForSequenceClassification.from_pretrained(
-                model_args.model_name_or_path,
-                #config = config,
-                cache_dir=training_args.cache_dir,
-                num_labels=train_dataset.num_labels,
-                #trust_remote_code=True,
-                token_type=training_args.token_type,
-                )
-    elif training_args.model_type == 'dnabert2':
-
-        if training_args.train_from_scratch:
-            pass
-        else:
-            print('Loading dnabert2 model')          
-            print(train_dataset.num_labels)
-            model = DNABERT2ForClassification.from_pretrained(
+            model =  RnaLmForSequenceClassification.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
                 num_labels=train_dataset.num_labels,
                 trust_remote_code=True,
-                use_alibi=model_args.use_alibi,
-                
-            )
-    # elif training_args.model_type == 'rna-fm' or training_args.model_type == 'esm-rna':
-    #     if training_args.train_from_scratch:
-    #         print(f'Loading {training_args.model_type} model')
-    #         print('Train from scratch')
-    #         config = AutoConfig.from_pretrained(model_args.model_name_or_path,
-    #             num_labels=train_dataset.num_labels)
-    #         model = transformers.AutoModelForSequenceClassification.from_config(
-    #             config
-    #             )
-    #     else:
-    #         print(training_args.model_type)
-    #         print(f'Loading {training_args.model_type} model')
-    #         model = EsmForSequenceClassification.from_pretrained(
-    #             model_args.model_name_or_path,
-    #             cache_dir=training_args.cache_dir,
-    #             num_labels=train_dataset.num_labels,
-    #             trust_remote_code=True,
-    #         )        
+                token_type=training_args.token_type,
+                attn_implementation=training_args.attn_implementation,
+                )
     elif training_args.model_type == 'rna-fm':      
         print(training_args.model_type)
         print(f'Loading {training_args.model_type} model')
@@ -442,31 +371,7 @@ def train():
             problem_type="single_label_classification",
             trust_remote_code=True,
         )     
-        # embedding_dim = model.bert.embeddings.word_embeddings.weight.size()
-
-        # print(f"Embedding dimension: {embedding_dim}")
-        # # 扩展模型嵌入以匹配新词表大小
-        # model.resize_token_embeddings(len(tokenizer))
-        # embedding_dim = model.bert.embeddings.word_embeddings.weight.size()
-        # print(f"Embedding dimension: {embedding_dim}")
         
-    else:
-        if training_args.train_from_scratch:
-            print('Loading esm model')
-            print('Train from scratch')
-            config = AutoConfig.from_pretrained(model_args.model_name_or_path,
-                num_labels=train_dataset.num_labels)
-            model = transformers.AutoModelForSequenceClassification.from_config(
-                config
-                )
-        else:
-            print('Loading esm model')
-            model = transformers.AutoModelForSequenceClassification.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                num_labels=train_dataset.num_labels,
-                trust_remote_code=True,
-            )
 
 
     # define trainer
