@@ -31,7 +31,7 @@ def load_vocab_file(vocab_file):
         return [l.strip() for l in lines]
 
 
-class RNALMTokenizer(PreTrainedTokenizer):
+class RnaLmTokenizer(PreTrainedTokenizer):
     """
     Constructs an ESM tokenizer.
     """

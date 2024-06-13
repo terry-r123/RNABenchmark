@@ -17,7 +17,7 @@
 from transformers.models.esm.configuration_esm import EsmConfig as TransformersEsmConfig
 
 
-class RNALMConfig(TransformersEsmConfig):
+class RnaLmConfig(TransformersEsmConfig):
 
     def __init__(
         self,

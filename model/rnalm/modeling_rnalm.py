@@ -25,9 +25,9 @@ from torch import nn, einsum
 from torch.nn import CrossEntropyLoss, MSELoss, BCEWithLogitsLoss
 import torch.autograd as autograd
 
-
+import warnings
 from transformers import PreTrainedModel
-from .rnalm_config import RNALMConfig as RNALMConfig
+from .rnalm_config import RnaLmConfig as RnaLmConfig
 from transformers.utils import add_start_docstrings, add_start_docstrings_to_model_forward, add_code_sample_docstrings
 from transformers.activations import gelu, gelu_new
 #from .modeling_utils import , 
@@ -53,7 +53,19 @@ from transformers.utils import (
     replace_return_docstrings,
 )
 logger = logging.get_logger(__name__)
+from transformers.utils  import logging,  is_flash_attn_greater_or_equal_2_10
+import inspect
+from flash_attn import flash_attn_func, flash_attn_varlen_func
+from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
 
+_flash_supports_window_size = "window_size" in list(inspect.signature(flash_attn_func).parameters)
+try:
+    from .flash_attn_triton import flash_attn_qkvpacked_func
+except ImportError as e:
+    flash_attn_qkvpacked_func = None
+from .bert_padding import (index_first_axis,
+                                            index_put_first_axis, pad_input,
+                                            unpad_input, unpad_input_only)
 BERT_PRETRAINED_MODEL_ARCHIVE_MAP = {
     "bert-base-uncased": "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-uncased-pytorch_model.bin",
 }
@@ -260,7 +272,7 @@ def mish(x):
 ACT2FN = {"gelu": gelu, "relu": torch.nn.functional.relu,  "gelu_new": gelu_new, "mish": mish}
 
 
-RNALMLayerNorm = torch.nn.LayerNorm
+RnaLmLayerNorm = torch.nn.LayerNorm
 
 ### ALiBi modules ###
 
@@ -308,7 +320,7 @@ def rebuild_alibi_tensor(    num_attention_heads: int,
         return alibi
         
 ###
-class RNALMEmbeddings(nn.Module):
+class RnaLmEmbeddings(nn.Module):
     """Construct the embeddings from word, position and token_type embeddings.
     """
 
@@ -329,7 +341,7 @@ class RNALMEmbeddings(nn.Module):
         
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
-        self.LayerNorm = RNALMLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.LayerNorm = RnaLmLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, input_ids=None, token_type_ids=None, position_ids=None, inputs_embeds=None, attention_mask=None,past_key_values_length=0):
@@ -362,7 +374,7 @@ class RNALMEmbeddings(nn.Module):
         return embeddings
 
 
-class RNALMSelfAttention(nn.Module):
+class RnaLmSelfAttention(nn.Module):
     def __init__(self, config, position_embedding_type=None):
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0 and not hasattr(config, "embedding_size"):
@@ -416,9 +428,10 @@ class RNALMSelfAttention(nn.Module):
         encoder_attention_mask: Optional[torch.FloatTensor] = None,
         past_key_value: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
         output_attentions: Optional[bool] = False,
+        bias: Optional[torch.Tensor] = None,
     ):
         bsz, q_len, _ = hidden_states.size()
-        #print(hidden_states.shape,attention_mask.shape)
+
         query_states = self.query(hidden_states)
         key_states = self.key(hidden_states)
         value_states = self.value(hidden_states)
@@ -441,10 +454,6 @@ class RNALMSelfAttention(nn.Module):
             )
 
         if attention_mask is not None:
-            # if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
-            #     raise ValueError(
-            #         f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
-            #     )
 
             attn_weights = attn_weights + attention_mask
 
@@ -470,10 +479,11 @@ class RNALMSelfAttention(nn.Module):
         #     outputs = outputs + (past_key_value,)
 
         return outputs
-class RNALMSelfAttentionFlash2(RNALMSelfAttention):
+class RnaLmSelfAttentionFlash2(RnaLmSelfAttention):
     # Copied from transformers.models.llama.modeling_llama.LlamaFlashAttention2.__init__
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        
 
         # TODO: Should be removed once Flash Attention for RoCm is bumped to 2.1.
         # flash_attn<2.1 generates top-left aligned causal mask, while what is needed here is bottom-right alignement, that was made default for flash_attn>=2.1. This attribute is used to handle this difference. Reference: https://github.com/Dao-AILab/flash-attention/releases/tag/v2.1.0.
@@ -504,7 +514,7 @@ class RNALMSelfAttentionFlash2(RNALMSelfAttention):
         value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
         kv_seq_len = key_states.shape[-2]
-        #print('kv_seq_len',kv_seq_len)
+        
         '''
         if past_key_value is not None:
             if self.layer_idx is None:
@@ -517,9 +527,10 @@ class RNALMSelfAttentionFlash2(RNALMSelfAttention):
         '''
         # Because the input can be padded, the absolute sequence length depends on the max position id.
         rotary_seq_len = kv_seq_len #max(kv_seq_len, position_ids[:, -1].max().item()) + 1
-        cos, sin = self.rotary_embeddings(value_states, seq_len=rotary_seq_len)
+        if self.position_embedding_type == "rotary":
+            cos, sin = self.rotary_embeddings(value_states, seq_len=rotary_seq_len)
 
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
+            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
 
         use_sliding_windows = (
             _flash_supports_window_size
@@ -625,8 +636,7 @@ class RNALMSelfAttentionFlash2(RNALMSelfAttention):
         else:
             # TODO: Remove the `query_length != 1` check once Flash Attention for RoCm is bumped to 2.1. For details, please see the comment in LlamaFlashAttention2 __init__.
             causal = self.is_causal and query_length != 1
-        # print(query_states.shape,key_states.shape,value_states.shape)
-        # print(attention_mask.shape)
+
         # Contains at least one padding token in the sequence
         if attention_mask is not None:
             batch_size = query_states.shape[0]
@@ -636,15 +646,10 @@ class RNALMSelfAttentionFlash2(RNALMSelfAttention):
 
             cu_seqlens_q, cu_seqlens_k = cu_seq_lens
             max_seqlen_in_batch_q, max_seqlen_in_batch_k = max_seq_lens
-            # print(query_states.shape,key_states.shape,value_states.shape)
-            # print(type(max_seqlen_in_batch_q))
-            # print(cu_seqlens_q.dtype,cu_seqlens_q.shape)
-            # print(type(dropout))
-            # print(type(softmax_scale))
-            # print(type(causal))
+           
             
             if not use_sliding_windows:
-                #print('111111111111111')
+    
                 attn_output_unpad = flash_attn_varlen_func(
                     query_states,
                     key_states,
@@ -698,7 +703,7 @@ class RNALMSelfAttentionFlash2(RNALMSelfAttention):
 
     def _upad_input(self, query_layer, key_layer, value_layer, attention_mask, query_length):
         batch_size, kv_seq_len, num_heads, head_dim = key_layer.shape
-        #print(key_layer.shape,query_length)
+
         # On the first iteration we need to properly re-create the padding mask
         # by slicing it on the proper place
         if kv_seq_len != attention_mask.shape[-1]:
@@ -737,8 +742,68 @@ class RNALMSelfAttentionFlash2(RNALMSelfAttention):
             (cu_seqlens_q, cu_seqlens_k),
             (max_seqlen_in_batch_q, max_seqlen_in_batch_k),
         )
+class RnaLmSelfAttentionTriton(RnaLmSelfAttention):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.config.hidden_size % self.config.num_attention_heads != 0 and not hasattr(
+                config, 'embedding_size'):
+            raise ValueError(
+                f'The hidden size ({self.config.hidden_size}) is not a multiple of the number of attention '
+                f'heads ({self.config.num_attention_heads})')
 
-class RNALMSelfOutput(nn.Module):
+        self.num_attention_heads = self.config.num_attention_heads
+        self.attention_head_size = int(self.config.hidden_size /
+                                       self.config.num_attention_heads)
+        self.all_head_size = self.num_attention_heads * self.attention_head_size
+        self.Wqkv = nn.Linear(self.all_head_size, 3 * self.config.hidden_size)
+        if flash_attn_qkvpacked_func is None:
+            print("No "*60)
+            warnings.warn(
+                'Unable to import Triton; defaulting MosaicBERT attention implementation to pytorch (this will reduce throughput when using this model).'
+            )
+        
+        print('using Triton Flash !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+    def forward(
+        self, hidden_states: torch.Tensor, cu_seqlens: torch.Tensor,
+                max_seqlen_in_batch: int, indices: torch.Tensor,
+                attn_mask: torch.Tensor, bias: torch.Tensor) -> torch.Tensor:
+
+        
+        qkv = self.Wqkv(hidden_states)
+
+        qkv = pad_input(qkv, indices, cu_seqlens.shape[0] - 1,
+                        max_seqlen_in_batch)  # batch, max_seqlen_in_batch, thd
+
+        qkv = rearrange(qkv,
+                        'b s (t h d) -> b s t h d',
+                        t=3,
+                        h=self.num_attention_heads)
+  
+        assert flash_attn_qkvpacked_func is not None
+
+        # Triton implementation only supports 0 attention dropout
+        convert_dtype = qkv.dtype not in [torch.float16, torch.bfloat16]
+
+        if convert_dtype:
+            # Triton implementation only supports fp16 and bf16
+            orig_dtype = qkv.dtype
+            qkv = qkv.to(torch.float16)
+            bias_dtype = bias.dtype
+            bias = bias.to(torch.float16)
+            attention = flash_attn_qkvpacked_func(qkv, bias)
+            attention = attention.to(orig_dtype)
+            bias = bias.to(bias_dtype)
+        else:
+            attention = flash_attn_qkvpacked_func(qkv, bias)
+
+        # attn_mask is 1 for attend and 0 for don't
+        attention = unpad_input_only(attention, torch.squeeze(attn_mask) == 1)
+
+        attn_output = rearrange(attention, 'nnz h d -> nnz (h d)')
+
+        outputs = (attn_output,)
+        return outputs
+class RnaLmSelfOutput(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
@@ -752,17 +817,17 @@ class RNALMSelfOutput(nn.Module):
         return hidden_states
 
 FlashEsm_ATTENTION_CLASSES = {
-    "eager": RNALMSelfAttention,
-    "flash_attention_2": RNALMSelfAttentionFlash2,
-    #"triton": EsmSelfAttentionTriton,
+    "eager": RnaLmSelfAttention,
+    "flash_attention_2": RnaLmSelfAttentionFlash2,
+    "triton": RnaLmSelfAttentionTriton,
 }
 
-class RNALMAttention(nn.Module):
+class RnaLmAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
-        #self.self = RNALMSelfAttention(config)
+        #self.self = RnaLmSelfAttention(config)
         self.self = FlashEsm_ATTENTION_CLASSES[config.attn_implementation](config)
-        self.output = RNALMSelfOutput(config)
+        self.output = RnaLmSelfOutput(config)
         self.pruned_heads = set()
 
     def forward(
@@ -787,9 +852,38 @@ class RNALMAttention(nn.Module):
         attention_output = self.output(self_outputs[0], hidden_states)
         outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
         return outputs
+class RnaLmAttention_Triton(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        #self.self = RnaLmSelfAttention(config)
+        self.self = FlashEsm_ATTENTION_CLASSES[config.attn_implementation](config)
+        self.output = RnaLmSelfOutput(config)
+        self.pruned_heads = set()
 
+    def forward(
+        self,
+        input_tensor: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        max_s: int,
+        subset_idx: Optional[torch.Tensor] = None,
+        indices: Optional[torch.Tensor] = None,
+        attn_mask: Optional[torch.Tensor] = None,
+        bias: Optional[torch.Tensor] = None,
+    ):
 
-class RNALMIntermediate(nn.Module):
+        self_outputs = self.self(input_tensor, cu_seqlens, max_s, indices,
+                                attn_mask, bias)
+     
+        #attention_output = self.output(self_outputs[0], input_tensor)
+        if subset_idx is not None:
+            attention_output = self.output(index_first_axis(self_outputs[0], subset_idx),
+                               index_first_axis(input_tensor, subset_idx))
+        else:
+            attention_output = self.output(self_outputs[0], input_tensor)
+        outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
+        return outputs
+
+class RnaLmIntermediate(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
@@ -804,7 +898,7 @@ class RNALMIntermediate(nn.Module):
         return hidden_states
 
 
-class RNALMOutput(nn.Module):
+class RnaLmOutput(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
@@ -818,15 +912,15 @@ class RNALMOutput(nn.Module):
         return hidden_states
 
 
-class RNALMLayer(nn.Module):
+class RnaLmLayer(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.attention = RNALMAttention(config)
+        self.attention = RnaLmAttention(config)
         self.is_decoder = config.is_decoder
         if self.is_decoder:
-            self.crossattention = RNALMAttention(config)
-        self.intermediate = RNALMIntermediate(config)
-        self.output = RNALMOutput(config)
+            self.crossattention = RnaLmAttention(config)
+        self.intermediate = RnaLmIntermediate(config)
+        self.output = RnaLmOutput(config)
 
     def forward(
         self,
@@ -838,6 +932,7 @@ class RNALMLayer(nn.Module):
         past_key_value: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
         output_attentions: Optional[bool] = False,
     ):
+
         self_attn_past_key_value = past_key_value[:2] if past_key_value is not None else None
         self_attention_outputs = self.attention(
             hidden_states,
@@ -878,288 +973,117 @@ class RNALMLayer(nn.Module):
         intermediate_output = self.intermediate(attention_output)
         layer_output = self.output(intermediate_output, attention_output)
         return layer_output
+class RnaLmLayer_Triton(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.attention = RnaLmAttention_Triton(config)
+        self.is_decoder = config.is_decoder
+        if self.is_decoder:
+            self.crossattention = RnaLmAttention(config)
+        self.intermediate = RnaLmIntermediate(config)
+        self.output = RnaLmOutput(config)
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        seqlen: int,
+        subset_idx: Optional[torch.Tensor] = None,
+        indices: Optional[torch.Tensor] = None,
+        attn_mask: Optional[torch.Tensor] = None,
+        bias: Optional[torch.Tensor] = None,
+    ):
+        self_attention_outputs = self.attention(hidden_states, cu_seqlens, seqlen,
+                                          subset_idx, indices, attn_mask, bias)
+        attention_output = self_attention_outputs[0]
+        
+        outputs = self_attention_outputs[1:]  # add self attentions if we output attention weights
+
+        layer_output = self.feed_forward_chunk(attention_output)
+
+        outputs = (layer_output,) + outputs
+
+        # if decoder, return the attn key/values as the last output
+        return outputs
+    def feed_forward_chunk(self, attention_output):
+        intermediate_output = self.intermediate(attention_output)
+        layer_output = self.output(intermediate_output, attention_output)
+        return layer_output
 ### Using flash attention
 
 #same as  class FlashMHA(nn.Module):
 
 import math
 from einops import rearrange
-# Try to import flash_attn, if not found, assign None
-# from flash_attn.flash_attn_interface import flash_attn_unpadded_qkvpacked_func
-# from flash_attn.bert_padding import unpad_input, pad_input
-# from flash_attn.flash_attention import FlashAttention
-try :
-    from flash_attn.flash_attn_interface import flash_attn_unpadded_qkvpacked_func
-    from flash_attn.bert_padding import unpad_input, pad_input
-    # from flash_attn.flash_attention import FlashAttention
-except:
-    flash_attn_unpadded_qkvpacked_func = None
-    unpad_input = None
-    pad_input = None
-    # FlashAttention = None
-    
 
-class FlashAttention(nn.Module):
-    """Implement the scaled dot product attention with softmax.
-    Arguments
-    ---------
-        softmax_scale: The temperature to use for the softmax attention.
-                      (default: 1/sqrt(d_keys) where d_keys is computed at
-                      runtime)
-        attention_dropout: The dropout rate to apply to the attention
-                           (default: 0.0)
-    """
-    def __init__(self, softmax_scale=None, attention_dropout=0.0):
-        super().__init__()
-        self.softmax_scale = softmax_scale
-        self.dropout_p = attention_dropout
-
-    def forward(self, qkv, key_padding_mask=None, causal=False, cu_seqlens=None,
-                max_s=None, need_weights=False):
-        """Implements the multihead softmax attention.
-        Arguments
-        ---------
-            qkv: The tensor containing the query, key, and value. (B, S, 3, H, D) if key_padding_mask is None
-                if unpadded: (nnz, 3, h, d)
-            key_padding_mask: a bool tensor of shape (B, S)
-        """
-        assert not need_weights
-        assert qkv.dtype in [torch.float16, torch.bfloat16]
-        assert qkv.is_cuda
-
-        if cu_seqlens is None:
-            batch_size = qkv.shape[0]
-            seqlen = qkv.shape[1]
-            if key_padding_mask is None:
-                qkv = rearrange(qkv, 'b s ... -> (b s) ...')
-                max_s = seqlen
-                cu_seqlens = torch.arange(0, (batch_size + 1) * seqlen, step=seqlen, dtype=torch.int32,
-                                        device=qkv.device)
-                # print(qkv.shape)
-                # print(cu_seqlens.shape)
-                output = flash_attn_unpadded_qkvpacked_func(
-                    qkv, cu_seqlens, max_s, self.dropout_p if self.training else 0.0,
-                    softmax_scale=self.softmax_scale, causal=causal
-                )
-                output = rearrange(output, '(b s) ... -> b s ...', b=batch_size)
-            else:
-                nheads = qkv.shape[-2]
-                x = rearrange(qkv, 'b s three h d -> b s (three h d)')
-                x_unpad, indices, cu_seqlens, max_s = unpad_input(x, key_padding_mask)
-                x_unpad = rearrange(x_unpad, 'nnz (three h d) -> nnz three h d', three=3, h=nheads)
-                # print(qkv.shape)
-                # print(cu_seqlens.shape)
-                output_unpad = flash_attn_unpadded_qkvpacked_func(
-                    x_unpad, cu_seqlens, max_s, self.dropout_p if self.training else 0.0,
-                    softmax_scale=self.softmax_scale, causal=causal
-                )
-                output = rearrange(pad_input(rearrange(output_unpad, 'nnz h d -> nnz (h d)'),
-                                            indices, batch_size, seqlen),
-                                'b s (h d) -> b s h d', h=nheads)
-        else:
-            assert max_s is not None
-            output = flash_attn_unpadded_qkvpacked_func(
-                qkv, cu_seqlens, max_s, self.dropout_p if self.training else 0.0,
-                softmax_scale=self.softmax_scale, causal=causal
-            )
-
-        return output, None
-
-
-class RNALMSelfAttention_flashattn(nn.Module):
-    def __init__(self, config,embed_dim, num_heads, bias=True, batch_first=True, attention_dropout=0.0,
-                 causal=False, device=None, dtype=None) -> None:
-        # contains: Linear(hidden->qkv), Attention, Linear
-        assert batch_first
-        factory_kwargs = {'device': device, 'dtype': dtype}
-        super().__init__()
-        self.embed_dim = embed_dim
-        self.causal = causal
-
-        self.num_heads = num_heads
-        assert self.embed_dim % num_heads == 0, "self.kdim must be divisible by num_heads"
-        self.head_dim = self.embed_dim // num_heads
-        assert self.head_dim % 8 == 0 and self.head_dim <= 128, "Only support head_dim <= 128 and divisible by 8"
-
-        self.Wqkv = nn.Linear(embed_dim, 3 * embed_dim, bias=bias, **factory_kwargs)
-        self.inner_attn = FlashAttention(attention_dropout=attention_dropout)
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias, **factory_kwargs)
-        self.position_embedding_type = getattr(
-            config, "position_embedding_type", "absolute"
-        )
-        
-        self.rotary_embeddings = None
-        if self.position_embedding_type == "relative_key" or self.position_embedding_type == "relative_key_query":
-            self.max_position_embeddings = config.max_position_embeddings
-            self.distance_embedding = nn.Embedding(2 * config.max_position_embeddings - 1, self.attention_head_size)
-        elif self.position_embedding_type == "rotary":
-            self.rotary_embeddings = RotaryEmbedding(dim=self.attention_head_size)
-    def forward(self, x, key_padding_mask=None, need_weights=False):
-        """x: (batch, seqlen, hidden_dim) (where hidden_dim = num heads * head dim)
-        key_padding_mask: bool tensor of shape (batch, seqlen)
-        """
-        qkv = self.Wqkv(x)
-        # print(x.shape)
-        # print(qkv.shape)
-        # print(key_padding_mask.shape)
-        key_padding_mask = key_padding_mask.squeeze()
-        qkv = rearrange(qkv, 'b s (three h d) -> b s three h d', three=3, h=self.num_heads)
-        # print(qkv.shape)
-        # original_dtype = qkv.dtype
-        # qkv = qkv.half()
-        context, attn_weights = self.inner_attn(qkv, key_padding_mask=key_padding_mask,
-                                                need_weights=need_weights, causal=self.causal)
-        # convert back to original dtype
-        # context = context.to(original_dtype)
-        return self.out_proj(rearrange(context, 'b s h d -> b s (h d)')), attn_weights
-
-class RNALMSelfOutput_flashattn(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.LayerNorm = RNALMLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
-
-    def forward(self, hidden_states, input_tensor):
-        hidden_states = self.dropout(hidden_states)
-        hidden_states = self.LayerNorm(hidden_states + input_tensor)
-        return hidden_states
-
-class RNALMAttention_flashattn(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        embed_dim = config.hidden_size
-        num_heads = config.num_attention_heads
-        attn_dropout = config.attention_probs_dropout_prob
-        self.self = RNALMSelfAttention_flashattn(config,embed_dim,num_heads,attention_dropout = attn_dropout)
-        self.output = RNALMSelfOutput_flashattn(config)
-        self.pruned_heads = set()
-
-    # def prune_heads(self, heads):
-    #     if len(heads) == 0:
-    #         return
-    #     mask = torch.ones(self.self.num_attention_heads, self.self.attention_head_size)
-    #     heads = set(heads) - self.pruned_heads  # Convert to set and remove already pruned heads
-    #     for head in heads:
-    #         # Compute how many pruned heads are before the head and move the index accordingly
-    #         head = head - sum(1 if h < head else 0 for h in self.pruned_heads)
-    #         mask[head] = 0
-    #     mask = mask.view(-1).contiguous().eq(1)
-    #     index = torch.arange(len(mask))[mask].long()
-
-    #     # Prune linear layers
-    #     self.self.query = prune_linear_layer(self.self.query, index)
-    #     self.self.key = prune_linear_layer(self.self.key, index)
-    #     self.self.value = prune_linear_layer(self.self.value, index)
-    #     self.output.dense = prune_linear_layer(self.output.dense, index, dim=1)
-
-    #     # Update hyper params and store pruned heads
-    #     self.self.num_attention_heads = self.self.num_attention_heads - len(heads)
-    #     self.self.all_head_size = self.self.attention_head_size * self.self.num_attention_heads
-    #     self.pruned_heads = self.pruned_heads.union(heads)
-
-    def forward(
-        self,
-        hidden_states,
-        attention_mask=None,
-        head_mask=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
-    ):
-        # if attention_mask is not None:
-        #     print(attention_mask.shape)
-        # else:
-        #     print("None attn")
-        # if head_mask is not None:
-        #     print(head_mask.shape)
-        # else:
-        #     print("None head")
-        # if encoder_hidden_states is not None:
-        #     print(encoder_hidden_states.shape)
-        # else:
-        #     print("None hidden")
-        # if encoder_attention_mask is not None:
-        #     print(encoder_attention_mask.shape)
-        # else:
-        #     print("None encoder_attn")
-        
-        self_outputs = self.self(
-            hidden_states, 
-            attention_mask,
-            #  head_mask, 
-            # encoder_hidden_states, encoder_attention_mask
-        )
-        # print(hidden_states.shape)
-        # print(attention_mask.shape)
-        # print(head_mask)
-        attention_output = self.output(self_outputs[0], hidden_states)
-        outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
-        return outputs
-
-class RNALMLayer_flashattn(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        print('------------')
-        print('using flash attn!!!')
-        print('------------')
-        self.attention = RNALMAttention_flashattn(config)
-        self.is_decoder = config.is_decoder
-        if self.is_decoder:
-            self.crossattention = RNALMAttention(config)
-        self.intermediate = RNALMIntermediate(config)
-        self.output = RNALMOutput(config)
-
-    def forward(
-        self,
-        hidden_states,
-        attention_mask=None,
-        head_mask=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
-    ):
-        self_attention_outputs = self.attention(hidden_states, attention_mask, head_mask)
-        attention_output = self_attention_outputs[0]
-        outputs = self_attention_outputs[1:]  # add self attentions if we output attention weights
-
-        if self.is_decoder and encoder_hidden_states is not None:
-            cross_attention_outputs = self.crossattention(
-                attention_output, attention_mask, head_mask, encoder_hidden_states, encoder_attention_mask
-            )
-            attention_output = cross_attention_outputs[0]
-            outputs = outputs + cross_attention_outputs[1:]  # add cross attentions if we output attention weights
-
-        intermediate_output = self.intermediate(attention_output)
-        layer_output = self.output(intermediate_output, attention_output)
-        outputs = (layer_output,) + outputs
-        return outputs
-
-### Using flash attention
-
-### Use longnet Dilated Attention （Under Active Development）
 
 import torch 
 import torch.nn as nn
 import torch.nn.functional as Fdropout
 
-class RNALMEncoder(nn.Module):
+class RnaLmEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
+        self.config = config
         self.output_attentions = config.output_attentions
         self.output_hidden_states = config.output_hidden_states
         self.num_attention_heads = config.num_attention_heads
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
         if self.position_embedding_type == 'alibi':
-            self.current_ALiBi_size = int(config.alibi_starting_size)
-            self.ALiBi_bias = torch.zeros(
-            (1, self.num_attention_heads, self.current_ALiBi_size,
-             self.current_ALiBi_size))
-            self.ALiBi_bias = rebuild_alibi_tensor(self.num_attention_heads,self.current_ALiBi_size)
-        
-        # pdb.set_trace()
-        # if getattr(config, 'use_flash_attn', False):
-        #     self.layer = nn.ModuleList([RNALMLayer_flashattn(config) for _ in range(config.num_hidden_layers)])
-        # else:
-        self.layer = nn.ModuleList([RNALMLayer(config) for _ in range(config.num_hidden_layers)])
+            self._current_alibi_size = int(config.alibi_starting_size)
+            self.alibi = torch.zeros(
+            (1, self.num_attention_heads, self._current_alibi_size,
+             self._current_alibi_size))
+            self.rebuild_alibi_tensor(size=config.alibi_starting_size)
+          
+        if self.position_embedding_type == 'alibi' and self.config.attn_implementation=='triton':
+            self.layer = nn.ModuleList([RnaLmLayer_Triton(config) for _ in range(config.num_hidden_layers)])
+        else:
+            self.layer = nn.ModuleList([RnaLmLayer(config) for _ in range(config.num_hidden_layers)])
+    def rebuild_alibi_tensor(self,
+                             size: int,
+                             device: Optional[Union[torch.device, str]] = None):
+        # Alibi
+        # Following https://github.com/ofirpress/attention_with_linear_biases/issues/5 (Implementation 1)
+        # In the causal case, you can exploit the fact that softmax is invariant to a uniform translation
+        # of the logits, which makes the math work out *after* applying causal masking. If no causal masking
+        # will be applied, it is necessary to construct the diagonal mask.
+        n_heads = self.num_attention_heads
 
+        def _get_alibi_head_slopes(n_heads: int) -> List[float]:
+
+            def get_slopes_power_of_2(n_heads: int) -> List[float]:
+                start = (2**(-2**-(math.log2(n_heads) - 3)))
+                ratio = start
+                return [start * ratio**i for i in range(n_heads)]
+
+            # In the paper, they only train models that have 2^a heads for some a. This function
+            # has some good properties that only occur when the input is a power of 2. To
+            # maintain that even when the number of heads is not a power of 2, we use a
+            # workaround.
+            if math.log2(n_heads).is_integer():
+                return get_slopes_power_of_2(n_heads)
+
+            closest_power_of_2 = 2**math.floor(math.log2(n_heads))
+            slopes_a = get_slopes_power_of_2(closest_power_of_2)
+            slopes_b = _get_alibi_head_slopes(2 * closest_power_of_2)
+            slopes_b = slopes_b[0::2][:n_heads - closest_power_of_2]
+            return slopes_a + slopes_b
+
+        context_position = torch.arange(size, device=device)[:, None]
+        memory_position = torch.arange(size, device=device)[None, :]
+        relative_position = torch.abs(memory_position - context_position)
+        # [n_heads, max_token_length, max_token_length]
+        relative_position = relative_position.unsqueeze(0).expand(
+            n_heads, -1, -1)
+        slopes = torch.Tensor(_get_alibi_head_slopes(n_heads)).to(device)
+        alibi = slopes.unsqueeze(1).unsqueeze(1) * -relative_position
+        # [1, n_heads, max_token_length, max_token_length]
+        alibi = alibi.unsqueeze(0)
+        assert alibi.shape == torch.Size([1, n_heads, size, size])
+
+        self._current_alibi_size = size
+        self.alibi = alibi
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -1171,60 +1095,117 @@ class RNALMEncoder(nn.Module):
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = False,
         output_hidden_states: Optional[bool] = False,
+        subset_mask: Optional[torch.Tensor] = None,
         return_dict: Optional[bool] = True,
     ):
         batch, seqlen = hidden_states.shape[:2]
         # check if ALiBi_bias is one the same device as hidden_states
         if self.position_embedding_type == 'alibi':
-            if self.ALiBi_bias.device != hidden_states.device:
-                self.ALiBi_bias = self.ALiBi_bias.to(hidden_states.device)
-                
-            if self.current_ALiBi_size < seqlen:
-            # Rebuild the alibi tensor when needed
-                self.current_ALiBi_size = seqlen
-                self.ALiBi_bias = rebuild_alibi_tensor(self.num_attention_heads,self.current_ALiBi_size,device=hidden_states.device)
-
-                
-            #  extend the attention mask to include the ALiBi bias
-            # extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-            extended_attention_mask = attention_mask.to(
-            dtype=next(self.parameters()).dtype)  # fp16 compatibility
+            
+            extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+            extended_attention_mask = extended_attention_mask.to(
+                dtype=next(self.parameters()).dtype)  # fp16 compatibility
             extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+
+            attention_mask_bool = attention_mask.bool()
+            batch, seqlen = hidden_states.shape[:2]
+            # Unpad inputs and mask. It will remove tokens that are padded.
+            # Assume ntokens is total number of tokens (padded and non-padded)
+            # and ntokens_unpad is total number of non-padded tokens.
+            # Then unpadding performs the following compression of the inputs:
+            # hidden_states[ntokens,hidden] -> hidden_states[ntokens_unpad,hidden]
             
-            alibi_bias = self.ALiBi_bias[:, :, :seqlen, :seqlen]
+            if self.config.attn_implementation=='triton':
+                hidden_states, indices, cu_seqlens, _ = unpad_input(
+                    hidden_states, attention_mask_bool)
+    
+            # Add alibi matrix to extended_attention_mask
+            if self._current_alibi_size < seqlen:
+                # Rebuild the alibi tensor when needed
+                warnings.warn(
+                    f'Increasing alibi size from {self._current_alibi_size} to {seqlen}'
+                )
+                self.rebuild_alibi_tensor(size=seqlen, device=hidden_states.device)
+            elif self.alibi.device != hidden_states.device:
+                # Device catch-up
+                self.alibi = self.alibi.to(hidden_states.device)
+            alibi_bias = self.alibi[:, :, :seqlen, :seqlen]
             attn_bias = extended_attention_mask[:, :, :seqlen, :seqlen]
-            alibi_attn_mask = attn_bias + alibi_bias
-            attention_mask = alibi_attn_mask
-            
-            
+            alibi_attn_mask = attn_bias + alibi_bias # use alibi
+            if self.config.attn_implementation == "eager":
+                attention_mask = alibi_attn_mask
+        else:
+            alibi_attn_mask = None
+        
+
         all_hidden_states = () if output_hidden_states else None
         all_self_attentions = () if output_attentions else None
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
         next_decoder_cache = () if use_cache else None
-        for i, layer_module in enumerate(self.layer):
-            if output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden_states,)
-
-            layer_head_mask = head_mask[i] if head_mask is not None else None
-            past_key_value = past_key_values[i] if past_key_values is not None else None
-
-            layer_outputs = layer_module(
-                hidden_states,
-                attention_mask,
-                layer_head_mask,
-                encoder_hidden_states,
-                encoder_attention_mask,
-                past_key_value,
-                output_attentions,
-            )
+        if subset_mask is not None:
+            assert self.position_embedding_type == 'alibi' and self.config.attn_implementation=='triton'
+            for i in range(len(self.layer) - 1):
+                layer_module = self.layer[i]
+                hidden_states = layer_module(hidden_states,
+                                             cu_seqlens,
+                                             seqlen,
+                                             None,
+                                             indices,
+                                             attn_mask=attention_mask,
+                                             bias=alibi_attn_mask)[0]
+                
+            #print('-1-1-1--1',hidden_states.shape)
+            subset_idx = torch.nonzero(subset_mask[attention_mask_bool],
+                                    as_tuple=False).flatten()
+            layer_outputs = self.layer[-1](hidden_states,
+                                        cu_seqlens,
+                                        seqlen,
+                                        subset_idx=subset_idx,
+                                        indices=indices,
+                                        attn_mask=attention_mask,
+                                        bias=alibi_attn_mask)
             hidden_states = layer_outputs[0]
+            #print('-1-1-1--1',hidden_states.shape)
+        else:
+            for i, layer_module in enumerate(self.layer):
+                if output_hidden_states:
+                    all_hidden_states = all_hidden_states + (hidden_states,)
+
+                layer_head_mask = head_mask[i] if head_mask is not None else None
+                past_key_value = past_key_values[i] if past_key_values is not None else None
+                if self.position_embedding_type == 'alibi' and self.config.attn_implementation=='triton':
+                  
+                    layer_outputs = layer_module(hidden_states,
+                                                cu_seqlens,
+                                                seqlen,
+                                                None,
+                                                indices,
+                                                attn_mask=attention_mask,
+                                                bias=alibi_attn_mask)
+                    hidden_states = layer_outputs[0]
+                  
+                    
+                else:
+                    layer_outputs = layer_module(
+                        hidden_states,
+                        attention_mask,
+                        layer_head_mask,
+                        encoder_hidden_states,
+                        encoder_attention_mask,
+                        past_key_value,
+                        output_attentions,
+                    )
+                    hidden_states = layer_outputs[0]
             if use_cache:
                 next_decoder_cache += (layer_outputs[-1],)
             if output_attentions:
                 all_self_attentions = all_self_attentions + (layer_outputs[1],)
                 if self.config.add_cross_attention:
                     all_cross_attentions = all_cross_attentions + (layer_outputs[2],)
-        #pdb.set_trace()
+        if self.position_embedding_type == 'alibi' and self.config.attn_implementation=='triton' and subset_mask is None:
+            hidden_states = pad_input(hidden_states, indices, batch, seqlen)
+           
+        
         # Add last layer
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
@@ -1250,22 +1231,24 @@ class RNALMEncoder(nn.Module):
         )
 
 
-class RNALMPooler(nn.Module):
+class RnaLmPooler(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.activation = nn.Tanh()
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states: torch.Tensor,
+                pool: Optional[bool] = True) -> torch.Tensor:
         # We "pool" the model by simply taking the hidden state corresponding
         # to the first token.
-        first_token_tensor = hidden_states[:, 0]
+        first_token_tensor = hidden_states[:, 0] if pool else hidden_states
+        
         pooled_output = self.dense(first_token_tensor)
         pooled_output = self.activation(pooled_output)
         return pooled_output
 
 
-class RNALMPredictionHeadTransform(nn.Module):
+class RnaLmPredictionHeadTransform(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
@@ -1273,7 +1256,7 @@ class RNALMPredictionHeadTransform(nn.Module):
             self.transform_act_fn = ACT2FN[config.hidden_act]
         else:
             self.transform_act_fn = config.hidden_act
-        self.LayerNorm = RNALMLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.LayerNorm = RnaLmLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
     def forward(self, hidden_states):
         hidden_states = self.dense(hidden_states)
@@ -1282,10 +1265,10 @@ class RNALMPredictionHeadTransform(nn.Module):
         return hidden_states
 
 
-class RNALMLMPredictionHead(nn.Module):
+class RnaLmLMPredictionHead(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.transform = RNALMPredictionHeadTransform(config)
+        self.transform = RnaLmPredictionHeadTransform(config)
 
         # The output weights are the same as the input embeddings, but there is
         # an output-only bias for each token.
@@ -1302,17 +1285,17 @@ class RNALMLMPredictionHead(nn.Module):
         return hidden_states
 
 
-class RNALMOnlyMLMHead(nn.Module):
+class RnaLmOnlyMLMHead(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.predictions = RNALMLMPredictionHead(config)
+        self.predictions = RnaLmLMPredictionHead(config)
 
     def forward(self, sequence_output):
         prediction_scores = self.predictions(sequence_output)
         return prediction_scores
 
 
-class RNALMOnlyNSPHead(nn.Module):
+class RnaLmOnlyNSPHead(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.seq_relationship = nn.Linear(config.hidden_size, 2)
@@ -1322,10 +1305,10 @@ class RNALMOnlyNSPHead(nn.Module):
         return seq_relationship_score
 
 
-class RNALMPreTrainingHeads(nn.Module):
+class RnaLmPreTrainingHeads(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.predictions = RNALMLMPredictionHead(config)
+        self.predictions = RnaLmLMPredictionHead(config)
         self.seq_relationship = nn.Linear(config.hidden_size, 2)
 
     def forward(self, sequence_output, pooled_output):
@@ -1334,13 +1317,13 @@ class RNALMPreTrainingHeads(nn.Module):
         return prediction_scores, seq_relationship_score
 
 
-class RNALMPreTrainedModel(PreTrainedModel):
+class RnaLmPreTrainedModel(PreTrainedModel):
     """
     An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
     models.
     """
 
-    config_class = RNALMConfig
+    config_class = RnaLmConfig
     load_tf_weights = load_tf_weights_in_bert
     base_model_prefix = "bert"
     supports_gradient_checkpointing = True
@@ -1435,10 +1418,10 @@ BERT_INPUTS_DOCSTRING = r"""
 
 
 @add_start_docstrings(
-    "The bare RNALM Model transformer outputting raw hidden-states without any specific head on top.",
+    "The bare RnaLm Model transformer outputting raw hidden-states without any specific head on top.",
     BERT_START_DOCSTRING,
 )
-class RNALMModel(RNALMPreTrainedModel):
+class RnaLmModel(RnaLmPreTrainedModel):
     """
 
     The model can behave as an encoder (with only self-attention) as well
@@ -1459,9 +1442,9 @@ class RNALMModel(RNALMPreTrainedModel):
         super().__init__(config)
         self.config = config
 
-        self.embeddings = RNALMEmbeddings(config)
-        self.encoder = RNALMEncoder(config)
-        self.pooler = RNALMPooler(config) if add_pooling_layer else None
+        self.embeddings = RnaLmEmbeddings(config)
+        self.encoder = RnaLmEncoder(config)
+        self.pooler = RnaLmPooler(config) if add_pooling_layer else None
 
         self.post_init()
 
@@ -1494,6 +1477,7 @@ class RNALMModel(RNALMPreTrainedModel):
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
+        masked_tokens_mask: Optional[torch.Tensor] = None,
         return_dict: Optional[bool] = None,
     ):
         r"""
@@ -1516,7 +1500,7 @@ class RNALMModel(RNALMPreTrainedModel):
             If set to `True`, `past_key_values` key value states are returned and can be used to speed up decoding (see
             `past_key_values`).
         """
-        #print(encoder_hidden_states)
+ 
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -1548,11 +1532,11 @@ class RNALMModel(RNALMPreTrainedModel):
 #        # ourselves in which case we just need to make it broadcastable to all heads.
 
         #self.config._attn_implementation = getattr(config, "_attn_implementation", "eager")
-        if self.config.attn_implementation == "eager":
-            extended_attention_mask: torch.Tensor = self.get_extended_attention_mask(attention_mask, input_shape)
-        elif self.config.attn_implementation == "flash_attention_2":
+        
+        if self.config.attn_implementation == "flash_attention_2" or self.config.attn_implementation=='triton' or self.config.position_embedding_type == 'alibi':
             extended_attention_mask = attention_mask
-
+        elif self.config.attn_implementation == "eager":
+            extended_attention_mask: torch.Tensor = self.get_extended_attention_mask(attention_mask, input_shape)
         # If a 2D ou 3D attention mask is provided for the cross-attention
         # we need to make broadcastabe to [batch_size, num_heads, seq_length, seq_length]
         if self.config.is_decoder and encoder_hidden_states is not None:
@@ -1577,6 +1561,15 @@ class RNALMModel(RNALMPreTrainedModel):
             attention_mask=attention_mask,
             past_key_values_length=past_key_values_length,
         )
+        subset_mask = []
+        first_col_mask = []
+
+        if masked_tokens_mask is None:
+            subset_mask = None
+        else:
+            first_col_mask = torch.zeros_like(masked_tokens_mask)
+            first_col_mask[:, 0] = True
+            subset_mask = masked_tokens_mask | first_col_mask
         encoder_outputs = self.encoder(
             embedding_output,
             attention_mask=extended_attention_mask,
@@ -1587,13 +1580,24 @@ class RNALMModel(RNALMPreTrainedModel):
             use_cache=use_cache,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            subset_mask=subset_mask,
             return_dict=return_dict,
         )
 
         sequence_output = encoder_outputs[0]
-
-        pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
-
+        if masked_tokens_mask is None:
+            pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
+        else:
+            attention_mask_bool = attention_mask.bool()
+            subset_idx = subset_mask[attention_mask_bool]  # type: ignore
+            sequence_output = sequence_output[
+                masked_tokens_mask[attention_mask_bool][subset_idx]]
+            if self.pooler is not None:
+                pool_input = encoder_outputs[0][
+                    first_col_mask[attention_mask_bool][subset_idx]]
+                pooled_output = self.pooler(pool_input, pool=False)
+            else:
+                pooled_output = None
         if not return_dict:
             return (sequence_output, pooled_output) + encoder_outputs[1:]
 
@@ -1608,13 +1612,13 @@ class RNALMModel(RNALMPreTrainedModel):
 
 
 
-@add_start_docstrings("""RNALM Model with a `language modeling` head on top. """, BERT_START_DOCSTRING)
-class RNALMForMaskedLM(RNALMPreTrainedModel):
+@add_start_docstrings("""RnaLm Model with a `language modeling` head on top. """, BERT_START_DOCSTRING)
+class RnaLmForMaskedLM(RnaLmPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
-        self.bert = RNALMModel(config)
-        self.cls = RNALMOnlyMLMHead(config)
-
+        self.bert = RnaLmModel(config)
+        self.cls = RnaLmOnlyMLMHead(config)
+        self.config = config
         self.init_weights()
 
     def get_output_embeddings(self):
@@ -1647,7 +1651,7 @@ class RNALMForMaskedLM(RNALMPreTrainedModel):
             in ``[0, ..., config.vocab_size]``
 
     Returns:
-        :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.RNALMConfig`) and inputs:
+        :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.RnaLmConfig`) and inputs:
         masked_lm_loss (`optional`, returned when ``masked_lm_labels`` is provided) ``torch.FloatTensor`` of shape ``(1,)``:
             Masked language modeling loss.
         ltr_lm_loss (:obj:`torch.FloatTensor` of shape :obj:`(1,)`, `optional`, returned when :obj:`lm_labels` is provided):
@@ -1668,11 +1672,11 @@ class RNALMForMaskedLM(RNALMPreTrainedModel):
 
         Examples::
 
-            from transformers import RNALMTokenizer, RNALMForMaskedLM
+            from transformers import RnaLmTokenizer, RnaLmForMaskedLM
             import torch
 
-            tokenizer = RNALMTokenizer.from_pretrained('bert-base-uncased')
-            model = RNALMForMaskedLM.from_pretrained('bert-base-uncased')
+            tokenizer = RnaLmTokenizer.from_pretrained('bert-base-uncased')
+            model = RnaLmForMaskedLM.from_pretrained('bert-base-uncased')
 
             input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute", add_special_tokens=True)).unsqueeze(0)  # Batch size 1
             outputs = model(input_ids, masked_lm_labels=input_ids)
@@ -1680,7 +1684,13 @@ class RNALMForMaskedLM(RNALMPreTrainedModel):
             loss, prediction_scores = outputs[:2]
 
         """
-        #pdb.set_trace()
+        if self.config.position_embedding_type == 'alibi' and self.config.attn_implementation=='triton':
+            if masked_lm_labels is None:
+                masked_tokens_mask = None
+            else:
+                masked_tokens_mask = masked_lm_labels > 0
+        else:
+            masked_tokens_mask = None
         outputs = self.bert(
             input_ids,
             attention_mask=attention_mask,
@@ -1690,6 +1700,7 @@ class RNALMForMaskedLM(RNALMPreTrainedModel):
             inputs_embeds=inputs_embeds,
             encoder_hidden_states=encoder_hidden_states,
             encoder_attention_mask=encoder_attention_mask,
+            masked_tokens_mask=masked_tokens_mask,
         )
         
         sequence_output = outputs[0]
@@ -1697,7 +1708,7 @@ class RNALMForMaskedLM(RNALMPreTrainedModel):
 
         outputs = (prediction_scores,) + outputs[2:]  # Add hidden states and attention if they are here
 
-        # Although this may seem awkward, RNALMForMaskedLM supports two scenarios:
+        # Although this may seem awkward, RnaLmForMaskedLM supports two scenarios:
         # 1. If a tensor that contains the indices of masked labels is provided,
         #    the cross-entropy is the MLM cross-entropy that measures the likelihood
         #    of predictions for masked words.
@@ -1705,7 +1716,14 @@ class RNALMForMaskedLM(RNALMPreTrainedModel):
         #    try to predict the next token for each input in the decoder.
         if masked_lm_labels is not None:
             loss_fct = CrossEntropyLoss()  # -100 index = padding token
-            masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), masked_lm_labels.view(-1))
+            if self.config.position_embedding_type == 'alibi' and self.config.attn_implementation=='triton':
+    
+                masked_token_idx = torch.nonzero(masked_lm_labels.flatten() > 0,
+                                             as_tuple=False).flatten()
+                masked_lm_loss = loss_fct(prediction_scores,
+                            masked_lm_labels.flatten()[masked_token_idx])                             
+            else:
+                masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), masked_lm_labels.view(-1))
             outputs = (masked_lm_loss,) + outputs
 
         if lm_labels is not None:
@@ -1723,18 +1741,18 @@ class RNALMForMaskedLM(RNALMPreTrainedModel):
 
 @add_start_docstrings(
     """
-    RNALM Model transformer with a sequence classification/regression head on top (a linear layer on top of the pooled
+    RnaLm Model transformer with a sequence classification/regression head on top (a linear layer on top of the pooled
     output) e.g. for GLUE tasks.
     """,
     BERT_START_DOCSTRING,
 )
-class RNALMForSequenceClassification(RNALMPreTrainedModel):
+class RnaLmForSequenceClassification(RnaLmPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
         self.config = config
 
-        self.bert = RNALMModel(config)
+        self.bert = RnaLmModel(config)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
         # Initialize weights and apply final processing
@@ -1785,7 +1803,7 @@ class RNALMForSequenceClassification(RNALMPreTrainedModel):
                     self.config.problem_type = "single_label_classification"
                 else:
                     self.config.problem_type = "multi_label_classification"
-            #print(self.config.problem_type)
+         
             if self.config.problem_type == "regression":
                 loss_fct = MSELoss()
                 if self.num_labels == 1:
@@ -1798,7 +1816,7 @@ class RNALMForSequenceClassification(RNALMPreTrainedModel):
             elif self.config.problem_type == "multi_label_classification":
                 loss_fct = BCEWithLogitsLoss()
                 loss = loss_fct(logits, labels)
-        #print('return_dict',return_dict)
+ 
         if not return_dict:
             output = (logits,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
@@ -1810,14 +1828,14 @@ class RNALMForSequenceClassification(RNALMPreTrainedModel):
             attentions=outputs.attentions,
         )
 
-class RNALMForNucleotideLevel(RNALMPreTrainedModel):
+class RnaLmForNucleotideLevel(RnaLmPreTrainedModel):
     # include Degradation and SpliceAI
     def __init__(self, config, tokenizer=None):
         super().__init__(config)
         self.num_labels = config.num_labels
         self.config = config
     
-        self.bert = RNALMModel(config)
+        self.bert = RnaLmModel(config)
        
         self.tokenizer = tokenizer
         if self.config.token_type == 'bpe' or  self.config.token_type=='non-overlap':
@@ -1893,7 +1911,7 @@ class RNALMForNucleotideLevel(RNALMPreTrainedModel):
                     mapping_final_input[bz,start_index:start_index + int(length.item()), :] = final_input[bz,i,:]
                     start_index += int(length.item())
             for nucleotide, indices in nucleotide_indices.items(): # indices:[bzid,seqid]
-                #print(nucleotide, indices) 
+ 
                 if indices.numel() > 0:  
                     bz_indices, pos_indices = indices.split(1, dim=1)
                     bz_indices = bz_indices.squeeze(-1) 
@@ -1901,12 +1919,7 @@ class RNALMForNucleotideLevel(RNALMPreTrainedModel):
                     nucleotide_logits = self.classifer_dict[nucleotide](mapping_final_input[bz_indices, pos_indices])
                     nucleotide_logits = nucleotide_logits.to(logits.dtype)
                     logits.index_put_((bz_indices, pos_indices), nucleotide_logits)
-            # for bz in range(batch_size): #exclude cls,sep token
-            #     ori_text = original_texts[bz]
-            #     ori_text = ori_text.replace(" ", "")
-            #     #print(len(ori_text))
-            #     for pos_id in range(1,ori_length-1):
-            #         logits[bz,pos_id,:] = self.classifer_dict[ori_text[pos_id-1]](mapping_final_input[bz,pos_id, :])
+          
         elif 'mer' in self.config.token_type:
             kmer=int(self.config.token_type[0])
             mapping_final_input = torch.zeros((batch_size, ori_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
@@ -1916,11 +1929,11 @@ class RNALMForNucleotideLevel(RNALMPreTrainedModel):
                 for i in range(1,value_length-1): #exclude cls,sep token
                     mapping_final_input[bz,i:i+kmer,:] += final_input[bz,i]
                 mapping_final_input[bz,value_length+kmer-1-1,:] = final_input[bz,value_length-1,:] #[sep] token
-        #print(mapping_final_input.shape,weight_mask.shape)
+
         mapping_final_input = mapping_final_input * weight_mask.unsqueeze(2)
         if 'mer' in self.config.token_type or self.config.token_type =='single': 
             logits = self.classifier(mapping_final_input)
-        #print(logits.shape)
+   
         
         loss = None
         if labels is not None:
@@ -1942,11 +1955,9 @@ class RNALMForNucleotideLevel(RNALMPreTrainedModel):
                     loss = loss_fct(logits, labels)
             elif self.config.problem_type == "single_label_classification":
                 loss_fct = CrossEntropyLoss()
-                #logits = logits[:, 1:1+labels.size(1), :]
+    
                 loss = loss_fct(logits.reshape(-1, self.num_labels), labels.reshape(-1).long())
-            # elif self.config.problem_type == "multi_label_classification":
-            #     loss_fct = BCEWithLogitsLoss()
-            #     loss = loss_fct(logits, labels)
+
         if not return_dict:
             output = (logits,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
@@ -1957,13 +1968,13 @@ class RNALMForNucleotideLevel(RNALMPreTrainedModel):
             attentions=outputs.attentions,
         )
 
-class RnaLmForCRISPROffTarget(RNALMPreTrainedModel):
+class RnaLmForCRISPROffTarget(RnaLmPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
         self.config = config
     
-        self.bert = RNALMModel(config)
+        self.bert = RnaLmModel(config)
 
 
         self.classifier = nn.Linear(config.hidden_size*2, config.num_labels)
@@ -2041,17 +2052,17 @@ class RnaLmForCRISPROffTarget(RNALMPreTrainedModel):
         return SequenceClassifierOutput(
             loss=loss,
             logits=logits,
-            hidden_states=sgrna_out.hidden_states,
-            attentions=sgrna_out.attentions,
+            hidden_states=None, #sgrna_out.hidden_states,
+            attentions=None, #sgrna_out.attentions,
         )
-class RNALMForStructuralimputation(RNALMPreTrainedModel):
+class RnaLmForStructuralimputation(RnaLmPreTrainedModel):
     # include Degradation and SpliceAI
     def __init__(self, config, tokenizer=None):
         super().__init__(config)
         self.num_labels = config.num_labels
         self.config = config
     
-        self.bert = RNALMModel(config)
+        self.bert = RnaLmModel(config)
        
         self.tokenizer = tokenizer
         if self.config.token_type == 'bpe' or  self.config.token_type=='non-overlap':
@@ -2130,7 +2141,7 @@ class RNALMForStructuralimputation(RNALMPreTrainedModel):
                     mapping_final_input[bz,start_index:start_index + int(length.item()), :] = final_input[bz,i,:]
                     start_index += int(length.item())
             for nucleotide, indices in nucleotide_indices.items(): # indices:[bzid,seqid]
-                #print(nucleotide, indices) 
+   
                 if indices.numel() > 0:  
                     bz_indices, pos_indices = indices.split(1, dim=1)
                     bz_indices = bz_indices.squeeze(-1) 
@@ -2138,7 +2149,7 @@ class RNALMForStructuralimputation(RNALMPreTrainedModel):
                     nucleotide_logits = self.down_mlp_dict[nucleotide](mapping_final_input[bz_indices, pos_indices])
                     nucleotide_logits = nucleotide_logits.to(inter_input.dtype)
                     inter_input.index_put_((bz_indices, pos_indices), nucleotide_logits)
-            #mapping_final_input = inter_input[:,1:-1,:]
+  
         elif 'mer' in self.config.token_type:
             kmer=int(self.config.token_type[0])
             mapping_final_input = torch.zeros((batch_size, ori_length, final_input.shape[-1]), dtype=final_input.dtype, device=final_input.device)
@@ -2148,15 +2159,14 @@ class RNALMForStructuralimputation(RNALMPreTrainedModel):
                 for i in range(1,value_length-1): #exclude cls,sep token
                     mapping_final_input[bz,i:i+kmer,:] += final_input[bz,i]
                 mapping_final_input[bz,value_length+kmer-1-1,:] = final_input[bz,value_length-1,:] #[sep] token
-        #print(mapping_final_input.shape,weight_mask.shape)
+        
         mapping_final_input = mapping_final_input * weight_mask.unsqueeze(2)
         
         if 'mer' in self.config.token_type or self.config.token_type =='single': 
             mapping_final_input = self.down_mlp(mapping_final_input)[:,1:-1,:] # exclude <cls> and <eos>
         elif self.config.token_type == 'bpe' or  self.config.token_type=='non-overlap':
             mapping_final_input = mapping_final_input[:,1:-1,:]
-        # print(labels.shape)
-        # print(struct.shape,mapping_final_input.shape)
+
         struct_input = self.embedding_struct(struct.unsqueeze(-1))
         
         final_input = torch.cat([mapping_final_input,struct_input], dim=-1)
@@ -2175,7 +2185,7 @@ class RNALMForStructuralimputation(RNALMPreTrainedModel):
                 print()
                 if self.num_labels == 1:
                     loss = loss_fct(logits[label_mask].squeeze(), labels.squeeze())
-                    # print(loss)
+      
                 else:
                     loss = loss_fct(logits[label_mask], labels)
 
