@@ -33,7 +33,7 @@ MODEL_PATH=${model_root}/baseline/BEACON-B/
 task='Secondary_structure_prediction'
 batch_size=1
 lr=3e-5
-DATA_PATH=${data_root}/downstream/${task}
+DATA_PATH=${data_root}/downstream/${task}/bpRNA
 OUTPUT_PATH=./outputs/ft/rna-all/${task}/BEACON-B/${MODEL_TYPE}  
 EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --num_processes=$nproc_per_node --main_process_port=$master_port --mixed_precision=fp16"
 echo ${MODEL_PATH}

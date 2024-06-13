@@ -1,80 +1,32 @@
-# RNABenchmark
+# BEACON: Benchmark for Comprehensive RNA Tasks and Language Models
 
-Repository for RNABenchmark
+This is the official codebase of the paper [BEACON: Benchmark for Comprehensive RNA Tasks and Language Models]()
 
 ## Prerequisites
 
-### Pretraining and Finetuning
+### Installation
+import lib:
+torch==1.13.1+cu117
+transformers==4.38.1
 
-- Python
-- PyTorch
-- Transformers
+
+```bash
+git clone https://github.com/terry-r123/RNABenchmark.git
+cd RNABenchmark
+conda activate -n beacon python=3.8
+pip install -r requirements.txt
+```
 
 ### Tasks and Datasets
 
-Data can be found in path "/mnt/data/oss_beijing/multi-omics/RNA/downstream/" on 3090 oss or DATA_PATH in script file.
+Data can be found in google drive
 
-#### Data
-- [x] Non-coding Function Classification
-- [x] Mean Ribosome Loading
-- [x] Vaccine Degradation Prediction
-- [x] Secondary structure prediction
-- [x] Modification Prediction
-- [x] Contact map prediction
-- [x] Distance map prediction
-
-- [x] Splice site prediction
-
-- [x] Isoform
-
-- [x] Programmable RNA Switches
-- [x] CRISPR On Target
-- [x] CRISPR Off Target
-- [ ] Prime Editing
-
-#### Processing
-- [x] Non-coding Function Classification
-- [x] Mean Ribosome Loading
-- [x] Vaccine Degradation Prediction
-- [x] Secondary structure prediction
-- [x] Modification Prediction
-- [x] Contact map prediction
-- [x] Distance map prediction
-
-- [ ] Splice site prediction
-
-- [ ] Isoform
-
-- [x] Programmable RNA Switches
-- [x] CRISPR On Target
-- [x] CRISPR Off Target
-- [ ] Prime Editing
-
-#### Code
-- [x] Non-coding Function Classification
-- [x] Mean Ribosome Loading
-- [x] Vaccine Degradation Prediction
-- [x] Secondary structure prediction
-- [x] Modification Prediction  solving small problem
-- [ ] Contact map prediction
-- [ ] Distance map prediction
-
-- [ ] Splice site prediction
-
-- [ ] Isoform
-
-- [x] Programmable RNA Switches
-- [x] CRISPR On Target
-- [x] CRISPR Off Target
-- [ ] Prime Editing
-
-
-### Analysis
-
-Results can be found in "https://aicarrier.feishu.cn/sheets/KyNGs5sWoh7tGBtQ5vkczWC6nIf?sheet=iUfeNc" on Feishu.
 
 
 ## Usage
-
-run the bash scripts in the `scripts` folder
+To evalute on all RNA tasks, you can run the bash scripts in the `scripts` folder, for example:
+```
+cd RNABenchmark
+bash ./scripts/BEACON-B/all_task.sh
+```
 
