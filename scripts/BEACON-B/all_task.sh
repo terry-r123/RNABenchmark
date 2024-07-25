@@ -35,7 +35,7 @@ batch_size=1
 lr=3e-5
 DATA_PATH=${data_root}/downstream/${task}/bpRNA
 OUTPUT_PATH=./outputs/ft/rna-all/${task}/BEACON-B/${MODEL_TYPE}  
-EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --num_processes=$nproc_per_node --main_process_port=$master_port --mixed_precision=fp16"
+EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
 echo ${MODEL_PATH}
 ${EXEC_PREFIX} \
 downstream/train_secondary_structure.py \
@@ -66,7 +66,7 @@ batch_size=1
 lr=3e-5
 DATA_PATH=${data_root}/downstream/${task}
 OUTPUT_PATH=./outputs/ft/rna-all/${task}/BEACON-B/${MODEL_TYPE}  
-EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --num_processes=$nproc_per_node --main_process_port=$master_port --mixed_precision=fp16"
+EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
 echo ${MODEL_PATH}
 ${EXEC_PREFIX} \
 downstream/train_contact_map.py \
@@ -95,7 +95,7 @@ batch_size=1
 lr=5e-5
 DATA_PATH=${data_root}/downstream/${task}
 OUTPUT_PATH=./outputs/ft/rna-all/${task}/BEACON-B/${MODEL_TYPE}  
-EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --num_processes=$nproc_per_node --main_process_port=$master_port --mixed_precision=fp16"
+EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
 echo ${MODEL_PATH}
 ${EXEC_PREFIX} \
 downstream/train_distance_map.py \
@@ -123,7 +123,7 @@ batch_size=32
 lr=3e-5
 DATA_PATH=${data_root}/downstream/${task}
 OUTPUT_PATH=./outputs/ft/rna-all/${task}/BEACON-B/${MODEL_TYPE}  
-EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --num_processes=$nproc_per_node --main_process_port=$master_port --mixed_precision=fp16"
+EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
 echo ${MODEL_PATH}
 ${EXEC_PREFIX} \
 downstream/train_structural_score_imputation.py \
@@ -157,7 +157,7 @@ batch_size=32
 lr=3e-5
 DATA_PATH=${data_root}/downstream/${task}
 OUTPUT_PATH=./outputs/ft/rna-all/${task}/BEACON-B/${MODEL_TYPE}  
-EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --num_processes=$nproc_per_node --main_process_port=$master_port --mixed_precision=fp16"
+EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
 echo ${MODEL_PATH}
 ${EXEC_PREFIX} \
 downstream/train_spliceai.py \
@@ -190,7 +190,7 @@ batch_size=32
 lr=5e-5
 DATA_PATH=${data_root}/downstream/${task}
 OUTPUT_PATH=./outputs/ft/rna-all/${task}/BEACON-B/${MODEL_TYPE}  
-EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --num_processes=$nproc_per_node --main_process_port=$master_port --mixed_precision=fp16"
+EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
 echo ${MODEL_PATH}
 ${EXEC_PREFIX} \
 downstream/train_isoform.py \
@@ -223,7 +223,7 @@ batch_size=16
 lr=5e-5
 DATA_PATH=${data_root}/downstream/${task}
 OUTPUT_PATH=./outputs/ft/rna-all/${task}/BEACON-B/${MODEL_TYPE}  
-EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --num_processes=$nproc_per_node --main_process_port=$master_port --mixed_precision=fp16"
+EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
 echo ${MODEL_PATH}
 ${EXEC_PREFIX} \
 downstream/train_ncrna.py \
@@ -257,7 +257,7 @@ batch_size=32
 lr=3e-5
 DATA_PATH=${data_root}/downstream/${task}
 OUTPUT_PATH=./outputs/ft/rna-all/${task}/BEACON-B/${MODEL_TYPE}  
-EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --num_processes=$nproc_per_node --main_process_port=$master_port --mixed_precision=fp16"
+EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
 echo ${MODEL_PATH}
 ${EXEC_PREFIX} \
 downstream/train_modification.py \
@@ -291,7 +291,7 @@ batch_size=32
 lr=1e-5
 DATA_PATH=${data_root}/downstream/${task}
 OUTPUT_PATH=./outputs/ft/rna-all/${task}/BEACON-B/${MODEL_TYPE}  
-EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --num_processes=$nproc_per_node --main_process_port=$master_port --mixed_precision=fp16"
+EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
 echo ${MODEL_PATH}
 ${EXEC_PREFIX} \
 downstream/train_mean_ribosome_loading.py \
@@ -325,7 +325,7 @@ batch_size=32
 lr=5e-5
 DATA_PATH=${data_root}/downstream/${task}/train-val-test
 OUTPUT_PATH=./outputs/ft/rna-all/${task}/BEACON-B/${MODEL_TYPE}  
-EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --num_processes=$nproc_per_node --main_process_port=$master_port --mixed_precision=fp16"
+EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
 echo ${MODEL_PATH}
 ${EXEC_PREFIX} \
 downstream/train_degradation.py \
@@ -359,7 +359,7 @@ batch_size=32
 lr=1e-5
 DATA_PATH=${data_root}/downstream/${task}
 OUTPUT_PATH=./outputs/ft/rna-all/${task}/BEACON-B/${MODEL_TYPE}  
-EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --num_processes=$nproc_per_node --main_process_port=$master_port --mixed_precision=fp16"
+EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
 echo ${MODEL_PATH}
 ${EXEC_PREFIX} \
 downstream/train_programmable_rna_switches.py \
@@ -392,7 +392,7 @@ batch_size=32
 lr=1e-5
 DATA_PATH=${data_root}/downstream/${task}
 OUTPUT_PATH=./outputs/ft/rna-all/${task}/BEACON-B/${MODEL_TYPE}  
-EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --num_processes=$nproc_per_node --main_process_port=$master_port --mixed_precision=fp16"
+EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
 echo ${MODEL_PATH}
 ${EXEC_PREFIX} \
 downstream/train_crispr_on_target.py \
@@ -425,7 +425,7 @@ batch_size=32
 lr=3e-5
 DATA_PATH=${data_root}/downstream/${task}
 OUTPUT_PATH=./outputs/ft/rna-all/${task}/BEACON-B/${MODEL_TYPE}  
-EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --num_processes=$nproc_per_node --main_process_port=$master_port --mixed_precision=fp16"
+EXEC_PREFIX="env CUDA_VISIBLE_DEVICES=$gpu_device torchrun --nproc_per_node=$nproc_per_node --master_port=$master_port"
 echo ${MODEL_PATH}
 ${EXEC_PREFIX} \
 downstream/train_crispr_off_target.py \
