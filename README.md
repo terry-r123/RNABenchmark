@@ -19,7 +19,7 @@ important libs:  torch==1.13.1+cu117, transformers==4.38.1
 ```bash
 git clone https://github.com/terry-r123/RNABenchmark.git
 cd RNABenchmark
-conda activate -n beacon python=3.8
+conda create -n beacon python=3.8
 pip install -r requirements.txt
 ```
 
